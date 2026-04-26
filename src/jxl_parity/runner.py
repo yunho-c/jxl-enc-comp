@@ -266,7 +266,7 @@ def _run_case(
     if _needs_visual_diff(result):
         diff_path = diff_dir / f"{case_id}.png"
         if write_visual_diff(image.reference_path, decoded_path, diff_path):
-            result.visual_diff_path = str(diff_path)
+            result.visual_diff_path = str(diff_path.relative_to(diff_dir.parent))
 
     return result
 
