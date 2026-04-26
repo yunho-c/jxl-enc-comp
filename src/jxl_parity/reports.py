@@ -27,8 +27,15 @@ def write_csv(path: Path, rows: Iterable[dict[str, object]]) -> None:
 def write_html(path: Path, summary: object, rows: list[dict[str, object]]) -> None:
     summary_dict = asdict(summary)
     headers = list(rows[0].keys()) if rows else []
+    failures = [row for row in rows if row.get("status") == "failed"]
+    decode_failures = [row for row in failures if row.get("reason") == "decode failed"]
+    lossless_failures = [
+        row for row in failures if row.get("mode") == "lossless" and row.get("reason") != "decode failed"
+    ]
     table_rows = "\n".join(
-        "<tr>" + "".join(f"<td>{html.escape(str(row.get(header, '')))}</td>" for header in headers) + "</tr>"
+        f"<tr class=\"{html.escape(str(row.get('status', '')))}\">"
+        + "".join(f"<td>{_format_cell(row.get(header, ''))}</td>" for header in headers)
+        + "</tr>"
         for row in rows
     )
     header_cells = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
@@ -36,6 +43,13 @@ def write_html(path: Path, summary: object, rows: list[dict[str, object]]) -> No
         f"<li><strong>{html.escape(key)}</strong>: {html.escape(str(value))}</li>"
         for key, value in summary_dict.items()
     )
+    quality_chart = _scatter_svg(rows, "bits_per_pixel", "ssimulacra2", "Lossy size vs SSIMULACRA2")
+    if quality_chart == "":
+        quality_chart = _scatter_svg(rows, "bits_per_pixel", "psnr", "Lossy size vs PSNR")
+    time_chart = _time_svg(rows)
+    failure_section = _section_table("Failures", failures)
+    decode_section = _section_table("Decode Failures", decode_failures)
+    lossless_section = _section_table("Lossless Round-Trip Failures", lossless_failures)
     path.write_text(
         f"""<!doctype html>
 <html lang="en">
@@ -44,19 +58,36 @@ def write_html(path: Path, summary: object, rows: list[dict[str, object]]) -> No
   <title>JPEG XL parity report</title>
   <style>
     body {{ font-family: system-ui, sans-serif; margin: 2rem; }}
+    section {{ margin: 2rem 0; }}
     table {{ border-collapse: collapse; width: 100%; font-size: 0.85rem; }}
     th, td {{ border: 1px solid #ddd; padding: 0.35rem 0.5rem; text-align: left; }}
     th {{ background: #f3f3f3; position: sticky; top: 0; }}
-    .failed {{ color: #9f1239; }}
+    tr.failed {{ background: #fff1f2; }}
+    tr.skipped {{ color: #71717a; }}
+    svg {{ max-width: 100%; height: auto; border: 1px solid #ddd; background: #fff; }}
   </style>
 </head>
 <body>
   <h1>JPEG XL parity report</h1>
   <ul>{summary_items}</ul>
-  <table>
-    <thead><tr>{header_cells}</tr></thead>
-    <tbody>{table_rows}</tbody>
-  </table>
+  {failure_section}
+  {decode_section}
+  {lossless_section}
+  <section>
+    <h2>Size and Quality</h2>
+    {quality_chart or "<p>No lossy quality data was available.</p>"}
+  </section>
+  <section>
+    <h2>Encode Time per Megapixel</h2>
+    {time_chart or "<p>No timing data was available.</p>"}
+  </section>
+  <section>
+    <h2>All Results</h2>
+    <table>
+      <thead><tr>{header_cells}</tr></thead>
+      <tbody>{table_rows}</tbody>
+    </table>
+  </section>
 </body>
 </html>
 """,
@@ -198,3 +229,105 @@ def _average(values: Iterable[object]) -> float | str:
 
 def math_is_finite(value: float) -> bool:
     return value == value and value not in {float("inf"), float("-inf")}
+
+
+def _format_cell(value: object) -> str:
+    if isinstance(value, str) and value.endswith(".png") and ("/visual_diffs/" in value or value.startswith("visual_diffs/")):
+        escaped = html.escape(value)
+        return f'<a href="{escaped}">{escaped}</a>'
+    return html.escape(str(value))
+
+
+def _section_table(title: str, rows: list[dict[str, object]]) -> str:
+    if not rows:
+        return f"<section><h2>{html.escape(title)}</h2><p>None.</p></section>"
+    headers = ["image_id", "encoder", "mode", "effort", "distance", "reason", "visual_diff_path"]
+    header_cells = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
+    body = "\n".join(
+        "<tr>" + "".join(f"<td>{_format_cell(row.get(header, ''))}</td>" for header in headers) + "</tr>"
+        for row in rows
+    )
+    return f"<section><h2>{html.escape(title)}</h2><table><thead><tr>{header_cells}</tr></thead><tbody>{body}</tbody></table></section>"
+
+
+def _scatter_svg(rows: list[dict[str, object]], x_key: str, y_key: str, title: str) -> str:
+    points = [
+        row
+        for row in rows
+        if row.get("mode") == "vardct"
+        and row.get("status") == "passed"
+        and _to_float(row.get(x_key)) is not None
+        and _to_float(row.get(y_key)) is not None
+    ]
+    if not points:
+        return ""
+
+    width, height = 760, 360
+    pad = 48
+    xs = [_to_float(row.get(x_key)) or 0.0 for row in points]
+    ys = [_to_float(row.get(y_key)) or 0.0 for row in points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+
+    def scale(value: float, low: float, high: float, out_low: float, out_high: float) -> float:
+        if high == low:
+            return (out_low + out_high) / 2
+        return out_low + ((value - low) / (high - low)) * (out_high - out_low)
+
+    circles = []
+    labels = []
+    colors = {"libjxl": "#2563eb", "jxl-encoder": "#dc2626"}
+    for row in points:
+        x = scale(_to_float(row.get(x_key)) or 0.0, min_x, max_x, pad, width - pad)
+        y = scale(_to_float(row.get(y_key)) or 0.0, min_y, max_y, height - pad, pad)
+        color = colors.get(str(row.get("encoder")), "#52525b")
+        label = html.escape(f"{row.get('encoder')} {row.get('image_id')}")
+        circles.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="{color}"><title>{label}</title></circle>')
+    labels.extend(
+        [
+            f'<text x="{pad}" y="24" font-size="16" font-weight="600">{html.escape(title)}</text>',
+            f'<text x="{pad}" y="{height - 10}" font-size="12">{html.escape(x_key)}: {min_x:.3g} - {max_x:.3g}</text>',
+            f'<text x="{width - pad - 160}" y="{height - 10}" font-size="12">{html.escape(y_key)}: {min_y:.3g} - {max_y:.3g}</text>',
+            f'<line x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{height - pad}" stroke="#71717a" />',
+            f'<line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height - pad}" stroke="#71717a" />',
+        ]
+    )
+    return f'<svg viewBox="0 0 {width} {height}" role="img">{"".join(labels + circles)}</svg>'
+
+
+def _time_svg(rows: list[dict[str, object]]) -> str:
+    values = []
+    for row in rows:
+        seconds = _to_float(row.get("encode_seconds"))
+        megapixels = _to_float(row.get("megapixels"))
+        if seconds is None or megapixels in {None, 0.0} or row.get("status") != "passed":
+            continue
+        values.append((seconds / (megapixels or 1.0), row))
+    if not values:
+        return ""
+
+    values = sorted(values, key=lambda item: item[0], reverse=True)[:20]
+    width = 760
+    row_height = 22
+    pad = 170
+    height = 40 + row_height * len(values)
+    max_value = max(value for value, _ in values)
+    bars = [f'<text x="16" y="24" font-size="16" font-weight="600">Slowest encode cases</text>']
+    for index, (value, row) in enumerate(values):
+        y = 42 + index * row_height
+        bar_width = 1 if max_value == 0 else (value / max_value) * (width - pad - 32)
+        label = html.escape(f"{row.get('encoder')} {row.get('mode')} e{row.get('effort')}")
+        bars.append(f'<text x="16" y="{y + 13}" font-size="12">{label}</text>')
+        bars.append(f'<rect x="{pad}" y="{y}" width="{bar_width:.1f}" height="14" fill="#0f766e" />')
+        bars.append(f'<text x="{pad + bar_width + 6:.1f}" y="{y + 12}" font-size="12">{value:.3f}s/MP</text>')
+    return f'<svg viewBox="0 0 {width} {height}" role="img">{"".join(bars)}</svg>'
+
+
+def _to_float(value: object) -> float | None:
+    if value in {"", None}:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math_is_finite(number) else None
