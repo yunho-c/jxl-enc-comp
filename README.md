@@ -79,12 +79,16 @@ Lossless cases fail on any decoded pixel mismatch. Lossy cases pass when encode
 and decode succeed; quality and size are reported for comparison rather than
 treated as bit-exact pass/fail criteria.
 
+`paired_comparisons.csv` lines up libjxl and jxl-encoder rows for the same
+image/settings and reports size, quality, and encode-time ratios.
+
 ## Report Artifacts
 
 Each run writes:
 
 - `summary.json`
 - `summary.csv`
+- `paired_comparisons.csv`
 - `per_image_results.csv`
 - `results.json`
 - `corpus_manifest.csv`

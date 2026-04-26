@@ -14,6 +14,7 @@ from .reports import (
     write_feature_coverage,
     write_html,
     write_json,
+    write_paired_comparisons,
     write_summary_csv,
 )
 
@@ -156,6 +157,7 @@ def run_suite(config: RunConfig) -> RunSummary:
     write_json(out_dir / "summary.json", asdict(summary))
     write_json(out_dir / "results.json", [asdict(result) for result in results])
     write_summary_csv(out_dir / "summary.csv", row_dicts)
+    write_paired_comparisons(out_dir / "paired_comparisons.csv", row_dicts)
     write_corpus_manifest(out_dir / "corpus_manifest.csv", row_dicts)
     write_csv(out_dir / "per_image_results.csv", row_dicts)
     write_feature_coverage(out_dir / "feature_coverage.md", row_dicts, tool_status)

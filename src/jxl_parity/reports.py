@@ -47,6 +47,8 @@ def write_html(path: Path, summary: object, rows: list[dict[str, object]]) -> No
     if quality_chart == "":
         quality_chart = _scatter_svg(rows, "bits_per_pixel", "psnr", "Lossy size vs PSNR")
     time_chart = _time_svg(rows)
+    paired_rows = _paired_comparison_rows(rows)
+    paired_section = _section_table("Paired Encoder Comparison", paired_rows)
     failure_section = _section_table("Failures", failures)
     decode_section = _section_table("Decode Failures", decode_failures)
     lossless_section = _section_table("Lossless Round-Trip Failures", lossless_failures)
@@ -73,6 +75,7 @@ def write_html(path: Path, summary: object, rows: list[dict[str, object]]) -> No
   {failure_section}
   {decode_section}
   {lossless_section}
+  {paired_section}
   <section>
     <h2>Size and Quality</h2>
     {quality_chart or "<p>No lossy quality data was available.</p>"}
@@ -193,6 +196,10 @@ def write_summary_csv(path: Path, rows: list[dict[str, object]]) -> None:
     write_csv(path, grouped.values())
 
 
+def write_paired_comparisons(path: Path, rows: list[dict[str, object]]) -> None:
+    write_csv(path, _paired_comparison_rows(rows))
+
+
 def write_corpus_manifest(path: Path, rows: list[dict[str, object]]) -> None:
     seen: dict[object, dict[str, object]] = {}
     for row in rows:
@@ -241,13 +248,96 @@ def _format_cell(value: object) -> str:
 def _section_table(title: str, rows: list[dict[str, object]]) -> str:
     if not rows:
         return f"<section><h2>{html.escape(title)}</h2><p>None.</p></section>"
-    headers = ["image_id", "encoder", "mode", "effort", "distance", "reason", "visual_diff_path"]
+    preferred_headers = ["image_id", "encoder", "mode", "effort", "distance", "reason", "visual_diff_path"]
+    headers = [header for header in preferred_headers if header in rows[0]]
+    headers.extend(header for header in rows[0] if header not in headers)
     header_cells = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
     body = "\n".join(
         "<tr>" + "".join(f"<td>{_format_cell(row.get(header, ''))}</td>" for header in headers) + "</tr>"
         for row in rows
     )
     return f"<section><h2>{html.escape(title)}</h2><table><thead><tr>{header_cells}</tr></thead><tbody>{body}</tbody></table></section>"
+
+
+def _paired_comparison_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[tuple[object, object, object, object], dict[str, dict[str, object]]] = {}
+    for row in rows:
+        key = (row["image_id"], row["mode"], row["distance"], row["effort"])
+        grouped.setdefault(key, {})[str(row["encoder"])] = row
+
+    comparisons: list[dict[str, object]] = []
+    for key in sorted(grouped, key=lambda item: tuple(str(part) for part in item)):
+        encoders = grouped[key]
+        libjxl = encoders.get("libjxl")
+        jxl_encoder = encoders.get("jxl-encoder")
+        if libjxl is None or jxl_encoder is None:
+            continue
+        libjxl_time_per_mp = _seconds_per_mp(libjxl)
+        jxl_encoder_time_per_mp = _seconds_per_mp(jxl_encoder)
+        comparisons.append(
+            {
+                "image_id": key[0],
+                "source_path": libjxl.get("source_path", ""),
+                "mode": key[1],
+                "distance": key[2],
+                "effort": key[3],
+                "libjxl_status": libjxl.get("status", ""),
+                "jxl_encoder_status": jxl_encoder.get("status", ""),
+                "libjxl_bpp": _number_or_blank(libjxl.get("bits_per_pixel")),
+                "jxl_encoder_bpp": _number_or_blank(jxl_encoder.get("bits_per_pixel")),
+                "bpp_ratio_jxl_encoder_to_libjxl": _ratio(
+                    jxl_encoder.get("bits_per_pixel"), libjxl.get("bits_per_pixel")
+                ),
+                "libjxl_psnr": _number_or_blank(libjxl.get("psnr")),
+                "jxl_encoder_psnr": _number_or_blank(jxl_encoder.get("psnr")),
+                "psnr_delta_jxl_encoder_minus_libjxl": _delta(jxl_encoder.get("psnr"), libjxl.get("psnr")),
+                "libjxl_ssimulacra2": _number_or_blank(libjxl.get("ssimulacra2")),
+                "jxl_encoder_ssimulacra2": _number_or_blank(jxl_encoder.get("ssimulacra2")),
+                "ssimulacra2_delta_jxl_encoder_minus_libjxl": _delta(
+                    jxl_encoder.get("ssimulacra2"), libjxl.get("ssimulacra2")
+                ),
+                "libjxl_butteraugli": _number_or_blank(libjxl.get("butteraugli")),
+                "jxl_encoder_butteraugli": _number_or_blank(jxl_encoder.get("butteraugli")),
+                "butteraugli_delta_jxl_encoder_minus_libjxl": _delta(
+                    jxl_encoder.get("butteraugli"), libjxl.get("butteraugli")
+                ),
+                "libjxl_encode_seconds_per_mp": _number_or_blank(libjxl_time_per_mp),
+                "jxl_encoder_encode_seconds_per_mp": _number_or_blank(jxl_encoder_time_per_mp),
+                "encode_time_ratio_jxl_encoder_to_libjxl": _ratio(
+                    jxl_encoder_time_per_mp, libjxl_time_per_mp
+                ),
+            }
+        )
+    return comparisons
+
+
+def _seconds_per_mp(row: dict[str, object]) -> float | None:
+    seconds = _to_float(row.get("encode_seconds"))
+    megapixels = _to_float(row.get("megapixels"))
+    if seconds is None or megapixels in {None, 0.0}:
+        return None
+    return seconds / (megapixels or 1.0)
+
+
+def _number_or_blank(value: object) -> float | str:
+    number = _to_float(value)
+    return number if number is not None else ""
+
+
+def _ratio(numerator: object, denominator: object) -> float | str:
+    numerator_float = _to_float(numerator)
+    denominator_float = _to_float(denominator)
+    if numerator_float is None or denominator_float in {None, 0.0}:
+        return ""
+    return numerator_float / (denominator_float or 1.0)
+
+
+def _delta(left: object, right: object) -> float | str:
+    left_float = _to_float(left)
+    right_float = _to_float(right)
+    if left_float is None or right_float is None:
+        return ""
+    return left_float - right_float
 
 
 def _scatter_svg(rows: list[dict[str, object]], x_key: str, y_key: str, title: str) -> str:
