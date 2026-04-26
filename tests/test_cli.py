@@ -22,6 +22,42 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertIn("error: no image files found", stderr.getvalue())
 
+    def test_invalid_run_mode_is_a_cli_error(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["run", "--modes", "lossless,typo"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--modes contains unsupported value", stderr.getvalue())
+
+    def test_vardct_requires_at_least_one_distance(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["run", "--modes", "vardct", "--distances", ""])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--distances must include at least one value", stderr.getvalue())
+
+    def test_profile_rejects_empty_efforts(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["profile", "--efforts", ""])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--efforts must include at least one value", stderr.getvalue())
+
+    def test_rejects_non_finite_distance(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["run", "--distances", "nan"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--distances values must be finite numbers", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

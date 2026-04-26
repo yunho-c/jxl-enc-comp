@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 from typing import Sequence
 
 from .profiler import ProfileConfig, run_profile
 from .runner import RunConfig, run_suite
+
+VALID_MODES = {"lossless", "vardct"}
+VALID_METRICS = {"psnr", "ssimulacra2", "butteraugli"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,17 +120,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
+        modes = _parse_csv_choice(parser, "--modes", args.modes, VALID_MODES)
+        distances = _parse_float_csv(parser, "--distances", args.distances, required=False, minimum=0.0)
+        efforts = _parse_int_csv(parser, "--efforts", args.efforts, minimum=1)
+        metrics = _parse_csv_choice(parser, "--metrics", args.metrics, VALID_METRICS, required=False)
+        _validate_sweep(parser, modes, distances, args.max_images)
         config = RunConfig(
             corpus=args.corpus,
             out_dir=args.out,
             cjxl=args.cjxl,
             djxl=args.djxl,
             jxl_encoder=args.jxl_encoder,
-            modes=_csv(args.modes),
-            distances=[float(value) for value in _csv(args.distances)],
-            efforts=[int(value) for value in _csv(args.efforts)],
+            modes=modes,
+            distances=distances,
+            efforts=efforts,
             max_images=args.max_images,
-            metrics=_csv(args.metrics),
+            metrics=metrics,
             keep_work=args.keep_work,
         )
         try:
@@ -142,15 +151,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1 if summary.failed_cases else 0
 
     if args.command == "profile":
+        modes = _parse_csv_choice(parser, "--modes", args.modes, VALID_MODES)
+        distances = _parse_float_csv(parser, "--distances", args.distances, required=False, minimum=0.0)
+        efforts = _parse_int_csv(parser, "--efforts", args.efforts, minimum=1)
+        _validate_sweep(parser, modes, distances, args.max_images)
         config = ProfileConfig(
             corpus=args.corpus,
             out_dir=args.out,
             cjxl=args.cjxl,
             jxl_encoder=args.jxl_encoder,
             encoder=args.encoder,
-            modes=_csv(args.modes),
-            distances=[float(value) for value in _csv(args.distances)],
-            efforts=[int(value) for value in _csv(args.efforts)],
+            modes=modes,
+            distances=distances,
+            efforts=efforts,
             max_images=args.max_images,
             keep_work=args.keep_work,
             instrument_stages=args.instrument_stages,
@@ -173,6 +186,85 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _parse_csv_choice(
+    parser: argparse.ArgumentParser,
+    option: str,
+    value: str,
+    allowed: set[str],
+    *,
+    required: bool = True,
+) -> list[str]:
+    items = _csv(value)
+    if required and not items:
+        parser.error(f"{option} must include at least one value")
+    unknown = sorted(item for item in items if item not in allowed)
+    if unknown:
+        parser.error(
+            f"{option} contains unsupported value(s): {', '.join(unknown)} "
+            f"(supported: {', '.join(sorted(allowed))})"
+        )
+    return items
+
+
+def _parse_float_csv(
+    parser: argparse.ArgumentParser,
+    option: str,
+    value: str,
+    *,
+    required: bool = True,
+    minimum: float | None = None,
+) -> list[float]:
+    items = _csv(value)
+    if required and not items:
+        parser.error(f"{option} must include at least one value")
+    numbers: list[float] = []
+    for item in items:
+        try:
+            number = float(item)
+        except ValueError:
+            parser.error(f"{option} contains a non-numeric value: {item}")
+        if not math.isfinite(number):
+            parser.error(f"{option} values must be finite numbers: {item}")
+        if minimum is not None and number < minimum:
+            parser.error(f"{option} values must be at least {minimum:g}: {item}")
+        numbers.append(number)
+    return numbers
+
+
+def _parse_int_csv(
+    parser: argparse.ArgumentParser,
+    option: str,
+    value: str,
+    *,
+    minimum: int | None = None,
+) -> list[int]:
+    items = _csv(value)
+    if not items:
+        parser.error(f"{option} must include at least one value")
+    numbers: list[int] = []
+    for item in items:
+        try:
+            number = int(item)
+        except ValueError:
+            parser.error(f"{option} contains a non-integer value: {item}")
+        if minimum is not None and number < minimum:
+            parser.error(f"{option} values must be at least {minimum}: {item}")
+        numbers.append(number)
+    return numbers
+
+
+def _validate_sweep(
+    parser: argparse.ArgumentParser,
+    modes: list[str],
+    distances: list[float],
+    max_images: int | None,
+) -> None:
+    if "vardct" in modes and not distances:
+        parser.error("--distances must include at least one value when vardct mode is enabled")
+    if max_images is not None and max_images < 1:
+        parser.error("--max-images must be at least 1")
 
 
 if __name__ == "__main__":

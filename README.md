@@ -25,6 +25,11 @@ It also auto-detects `cjxl`, `djxl`, `cjxl-rs`, `ssimulacra2`, and `butteraugli`
 on `PATH`. Missing optional tools are reported in the output instead of causing
 the whole run to fail.
 
+Sweep arguments are validated before a run starts: unsupported modes/metrics,
+empty effort lists, empty VarDCT distance lists, negative distances, and
+non-positive `--max-images` values fail with a CLI error instead of producing an
+empty or all-skipped report.
+
 Install the Rust encoder CLI with:
 
 ```bash
