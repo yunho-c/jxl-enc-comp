@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageEnhance
 
 from .codecs import run_command, tool_path
 
@@ -58,6 +58,21 @@ def compute_external_metric(metric: str, reference_path: Path, decoded_path: Pat
     return float(match.group(0)) if match else None
 
 
+def write_visual_diff(reference_path: Path, decoded_path: Path, output_path: Path) -> bool:
+    with Image.open(reference_path) as reference, Image.open(decoded_path) as decoded:
+        if reference.size != decoded.size:
+            return False
+        if decoded.mode != reference.mode:
+            decoded = decoded.convert(reference.mode)
+        diff = ImageChops.difference(reference, decoded)
+        if diff.mode not in {"RGB", "RGBA"}:
+            diff = diff.convert("RGB")
+        diff = ImageEnhance.Brightness(diff).enhance(8.0)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        diff.save(output_path)
+        return True
+
+
 def _mse(reference: Image.Image, decoded: Image.Image) -> float:
     ref_bytes = reference.tobytes()
     dec_bytes = decoded.tobytes()
@@ -70,4 +85,3 @@ def _mse(reference: Image.Image, decoded: Image.Image) -> float:
         delta = left - right
         total += delta * delta
     return total / len(ref_bytes)
-

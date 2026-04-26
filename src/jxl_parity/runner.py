@@ -7,8 +7,15 @@ from typing import Any
 
 from .codecs import decode, encode, tool_path
 from .corpus import ImageRecord, discover_images
-from .metrics import compare_pixels, compute_external_metric
-from .reports import write_csv, write_html, write_json
+from .metrics import compare_pixels, compute_external_metric, write_visual_diff
+from .reports import (
+    write_corpus_manifest,
+    write_csv,
+    write_feature_coverage,
+    write_html,
+    write_json,
+    write_summary_csv,
+)
 
 
 @dataclass(frozen=True)
@@ -65,6 +72,7 @@ class CaseResult:
     butteraugli: float | None = None
     equal_pixels: bool | None = None
     max_channel_delta: int | None = None
+    visual_diff_path: str | None = None
     command: str | None = None
     stderr: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -75,7 +83,8 @@ def run_suite(config: RunConfig) -> RunSummary:
     work_dir = out_dir / "work"
     encoded_dir = work_dir / "encoded"
     decoded_dir = work_dir / "decoded"
-    for directory in (out_dir, work_dir, encoded_dir, decoded_dir):
+    diff_dir = out_dir / "visual_diffs"
+    for directory in (out_dir, work_dir, encoded_dir, decoded_dir, diff_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     tool_status = {
@@ -107,6 +116,7 @@ def run_suite(config: RunConfig) -> RunSummary:
                             distance=distance,
                             encoded_dir=encoded_dir,
                             decoded_dir=decoded_dir,
+                            diff_dir=diff_dir,
                         )
                     )
                     results.append(
@@ -122,6 +132,7 @@ def run_suite(config: RunConfig) -> RunSummary:
                             distance=distance,
                             encoded_dir=encoded_dir,
                             decoded_dir=decoded_dir,
+                            diff_dir=diff_dir,
                         )
                     )
 
@@ -141,7 +152,10 @@ def run_suite(config: RunConfig) -> RunSummary:
     row_dicts = [_flatten_result(result) for result in results]
     write_json(out_dir / "summary.json", asdict(summary))
     write_json(out_dir / "results.json", [asdict(result) for result in results])
+    write_summary_csv(out_dir / "summary.csv", row_dicts)
+    write_corpus_manifest(out_dir / "corpus_manifest.csv", row_dicts)
     write_csv(out_dir / "per_image_results.csv", row_dicts)
+    write_feature_coverage(out_dir / "feature_coverage.md", row_dicts, tool_status)
     write_html(out_dir / "report.html", summary, row_dicts)
 
     if not config.keep_work:
@@ -163,6 +177,7 @@ def _run_case(
     distance: float | None,
     encoded_dir: Path,
     decoded_dir: Path,
+    diff_dir: Path,
 ) -> CaseResult:
     result = _base_result(image, encoder_name, mode, effort, distance)
     if mode not in {"lossless", "vardct"}:
@@ -230,6 +245,11 @@ def _run_case(
         if "butteraugli" in config.metrics:
             result.butteraugli = compute_external_metric("butteraugli", image.reference_path, decoded_path)
 
+    if _needs_visual_diff(result):
+        diff_path = diff_dir / f"{case_id}.png"
+        if write_visual_diff(image.reference_path, decoded_path, diff_path):
+            result.visual_diff_path = str(diff_path)
+
     return result
 
 
@@ -278,3 +298,14 @@ def _flatten_result(result: CaseResult) -> dict[str, object]:
     row = asdict(result)
     row.pop("extra", None)
     return row
+
+
+def _needs_visual_diff(result: CaseResult) -> bool:
+    if result.status == "failed":
+        return True
+    if result.mode == "vardct":
+        if result.ssimulacra2 is not None and result.ssimulacra2 < 70:
+            return True
+        if result.psnr is not None and result.psnr < 30:
+            return True
+    return False
