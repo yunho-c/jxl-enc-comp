@@ -79,9 +79,9 @@ def _prepare_reference(source_path: Path, reference_dir: Path) -> ImageRecord:
     reference_path = reference_dir / f"{image_id}.png"
 
     with Image.open(source_path) as image:
+        source_format = image.format or source_path.suffix.lstrip(".").upper()
         image = ImageOps.exif_transpose(image)
         mode = image.mode
-        source_format = image.format or source_path.suffix.lstrip(".").upper()
         has_alpha = _has_alpha(image)
         bit_depth = _bit_depth(image)
 
@@ -150,4 +150,3 @@ def _bit_depth(image: Image.Image) -> int | None:
     if image.mode in {"L", "LA", "P", "RGB", "RGBA"}:
         return 8
     return None
-
