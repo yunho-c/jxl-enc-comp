@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jxl-enc-comp"
+version = "0.1.0"
+description = "Parity test harness for comparing libjxl and jxl-encoder outputs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "Pillow>=10",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[project.scripts]
+jxl-parity = "jxl_parity.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
