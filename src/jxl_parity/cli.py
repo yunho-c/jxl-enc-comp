@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .profiler import ProfileConfig, run_profile
 from .runner import RunConfig, run_suite
 
 
@@ -58,6 +59,55 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Keep intermediate encoded and decoded files.",
     )
+
+    profile = subparsers.add_parser("profile", help="Run profiling-oriented encoder sweeps.")
+    profile.add_argument(
+        "--corpus",
+        action="append",
+        type=Path,
+        default=[],
+        help="Corpus directory or image file. May be supplied more than once.",
+    )
+    profile.add_argument("--out", type=Path, default=Path("reports/profile"), help="Output directory.")
+    profile.add_argument("--cjxl", default="cjxl", help="libjxl encoder command.")
+    profile.add_argument("--jxl-encoder", default="cjxl-rs", help="jxl-encoder CLI command.")
+    profile.add_argument(
+        "--encoder",
+        choices=("jxl-encoder", "libjxl", "both"),
+        default="jxl-encoder",
+        help="Encoder to profile.",
+    )
+    profile.add_argument(
+        "--modes",
+        default="lossless,vardct",
+        help="Comma-separated modes to run: lossless,vardct.",
+    )
+    profile.add_argument(
+        "--distances",
+        default="1.0,2.0",
+        help="Comma-separated Butteraugli distances for vardct mode.",
+    )
+    profile.add_argument(
+        "--efforts",
+        default="7",
+        help="Comma-separated effort values.",
+    )
+    profile.add_argument(
+        "--max-images",
+        type=int,
+        default=None,
+        help="Limit the number of discovered images for a profiling smoke run.",
+    )
+    profile.add_argument(
+        "--instrument-stages",
+        action="store_true",
+        help="Mark the run as intended for stage instrumentation and emit profiler guidance.",
+    )
+    profile.add_argument(
+        "--keep-work",
+        action="store_true",
+        help="Keep intermediate reference PNGs and encoded files.",
+    )
     return parser
 
 
@@ -87,6 +137,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Wrote reports to {summary.out_dir}")
         print(
             f"cases={summary.total_cases} passed={summary.passed_cases} "
+            f"failed={summary.failed_cases} skipped={summary.skipped_cases}"
+        )
+        return 1 if summary.failed_cases else 0
+
+    if args.command == "profile":
+        config = ProfileConfig(
+            corpus=args.corpus,
+            out_dir=args.out,
+            cjxl=args.cjxl,
+            jxl_encoder=args.jxl_encoder,
+            encoder=args.encoder,
+            modes=_csv(args.modes),
+            distances=[float(value) for value in _csv(args.distances)],
+            efforts=[int(value) for value in _csv(args.efforts)],
+            max_images=args.max_images,
+            keep_work=args.keep_work,
+            instrument_stages=args.instrument_stages,
+        )
+        try:
+            summary = run_profile(config)
+        except FileNotFoundError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        print(f"Wrote profile artifacts to {summary.out_dir}")
+        print(
+            f"cases={summary.total_cases} completed={summary.completed_cases} "
             f"failed={summary.failed_cases} skipped={summary.skipped_cases}"
         )
         return 1 if summary.failed_cases else 0

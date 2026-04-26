@@ -164,7 +164,7 @@ def write_feature_coverage(path: Path, rows: list[dict[str, object]], tool_statu
         ("Butteraugli metric", "available" if tool_status.get("butteraugli") else "missing", "same", "Optional external metric."),
         ("animation", "not implemented", "not implemented", "Single-frame parity suite scope."),
         ("ICC/Exif/XMP metadata", "not validated", "not validated", "Inputs are normalized to pixel references for encoder parity."),
-        ("stage instrumentation", "external profiler", "external profiler", "Use emitted timing data with profiler/flamegraphs."),
+        ("stage instrumentation", "profile command", "profile command", "Use `jxl-parity profile` totals with profiler/flamegraphs."),
     ]
 
     lines = [

@@ -99,6 +99,36 @@ Each run writes:
 Use `--keep-work` to retain intermediate reference PNGs, `.jxl` files, and
 decoded PNGs under `work/`.
 
+## Profiling Sweeps
+
+Use `jxl-parity profile` when you want profiling-oriented encode timings without
+the decode and quality-metric pass:
+
+```bash
+jxl-parity profile \
+  --encoder jxl-encoder \
+  --instrument-stages \
+  --corpus ~/GitHub/test_images \
+  --modes lossless,vardct \
+  --distances 1.0,2.0 \
+  --efforts 5,7,9 \
+  --out reports/profile
+```
+
+The profile command writes:
+
+- `profile_summary.json`
+- `profile_results.json`
+- `profile_runs.csv`
+- `stage_timing.json`
+- `profiler_commands.md`
+
+`stage_timing.json` records top-level encode wall time as `encode_total`. The
+stock encoder CLIs do not expose internal JPEG XL stage timings, so use
+`profiler_commands.md` to capture stack samples or flamegraphs for representative
+cases and compare them with the parity report before treating a hot
+`jxl-encoder` stage as a libjxl surrogate.
+
 ## Tests
 
 ```bash
