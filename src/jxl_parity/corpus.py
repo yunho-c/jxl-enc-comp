@@ -85,10 +85,10 @@ def _prepare_reference(source_path: Path, reference_dir: Path) -> ImageRecord:
         has_alpha = _has_alpha(image)
         bit_depth = _bit_depth(image)
 
-        if source_path.suffix.lower() == ".png":
+        normalized = _normalize_for_png(image)
+        if source_path.suffix.lower() == ".png" and normalized.mode == image.mode:
             shutil.copyfile(source_path, reference_path)
         else:
-            normalized = _normalize_for_png(image)
             normalized.save(reference_path)
             mode = normalized.mode
             has_alpha = _has_alpha(normalized)
@@ -116,8 +116,12 @@ def _prepare_reference(source_path: Path, reference_dir: Path) -> ImageRecord:
 def _normalize_for_png(image: Image.Image) -> Image.Image:
     if image.mode in {"L", "LA", "RGB", "RGBA", "I;16", "I;16B", "I;16L"}:
         return image.copy()
+    if image.mode == "1":
+        return image.convert("L")
     if image.mode == "P" and ("transparency" in image.info):
         return image.convert("RGBA")
+    if image.mode == "P":
+        return image.convert("RGB")
     if _has_alpha(image):
         return image.convert("RGBA")
     return image.convert("RGB")

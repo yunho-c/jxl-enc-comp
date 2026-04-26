@@ -59,10 +59,11 @@ jxl-parity run --cjxl /opt/homebrew/bin/cjxl --djxl /opt/homebrew/bin/djxl --jxl
 
 ## What Gets Compared
 
-Every input is prepared as a PNG pixel reference before encoding. PNG inputs are
-copied directly; other image types are normalized through Pillow. This keeps the
-suite focused on pixel-encoding parity and avoids mixing libjxl's JPEG
-transcoding path into `jxl-encoder` comparisons.
+Every input is prepared as a PNG pixel reference before encoding. PNG inputs in
+direct pixel modes are copied directly, while palette/1-bit PNGs and other image
+types are normalized through Pillow. This keeps the suite focused on
+pixel-encoding parity and avoids mixing libjxl's JPEG transcoding path into
+`jxl-encoder` comparisons.
 
 For each image, mode, distance, effort, and encoder, the suite records:
 

@@ -50,6 +50,31 @@ class MetricsTests(unittest.TestCase):
             self.assertFalse(size_result.same_size)
             self.assertEqual(size_result.decoded_size, (3, 2))
 
+    def test_compare_pixels_handles_sixteen_bit_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            reference = root / "reference.png"
+            same = root / "same.png"
+            different = root / "different.png"
+
+            base = Image.new("I;16", (2, 1))
+            base.putdata([0, 65535])
+            base.save(reference)
+            base.save(same)
+
+            changed = Image.new("I;16", (2, 1))
+            changed.putdata([0, 65534])
+            changed.save(different)
+
+            exact = compare_pixels(reference, same)
+            mismatch = compare_pixels(reference, different)
+
+            self.assertTrue(exact.equal_pixels)
+            self.assertTrue(math.isinf(exact.psnr or 0))
+            self.assertFalse(mismatch.equal_pixels)
+            self.assertEqual(mismatch.max_channel_delta, 1)
+            self.assertGreater(mismatch.psnr or 0, 90)
+
     def test_write_visual_diff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

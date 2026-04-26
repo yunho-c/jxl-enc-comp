@@ -29,7 +29,28 @@ class CorpusTests(unittest.TestCase):
             self.assertTrue(all(record.reference_path.exists() for record in records))
             self.assertEqual({record.source_format for record in records}, {"PNG", "JPEG"})
 
+    def test_normalizes_palette_and_one_bit_png_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            work = root / "work"
+            corpus.mkdir()
+
+            palette = Image.new("P", (2, 1))
+            palette.putpalette([255, 0, 0, 0, 255, 0] + [0, 0, 0] * 254)
+            palette.putdata([0, 1])
+            palette.save(corpus / "palette.png")
+
+            one_bit = Image.new("1", (2, 1))
+            one_bit.putdata([0, 1])
+            one_bit.save(corpus / "one-bit.png")
+
+            records = discover_images([corpus], work)
+            modes = {record.source_path.name: record.mode for record in records}
+
+            self.assertEqual(modes["palette.png"], "RGB")
+            self.assertEqual(modes["one-bit.png"], "L")
+
 
 if __name__ == "__main__":
     unittest.main()
-
