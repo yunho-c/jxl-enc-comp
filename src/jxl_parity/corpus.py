@@ -5,7 +5,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 
 DEFAULT_CORPORA = (
@@ -33,13 +33,14 @@ IMAGE_EXTENSIONS = {
 class ImageRecord:
     image_id: str
     source_path: Path
-    reference_path: Path
+    reference_path: Path | None
     width: int
     height: int
     mode: str
     source_format: str
     has_alpha: bool
     bit_depth: int | None
+    unsupported_reason: str | None = None
 
     @property
     def megapixels(self) -> float:
@@ -56,7 +57,7 @@ def discover_images(paths: list[Path], work_dir: Path, max_images: int | None = 
     candidates: list[Path] = []
     for input_path in inputs:
         expanded = input_path.expanduser()
-        if expanded.is_file() and _is_image(expanded):
+        if expanded.is_file():
             candidates.append(expanded)
         elif expanded.is_dir():
             candidates.extend(
@@ -74,7 +75,16 @@ def discover_images(paths: list[Path], work_dir: Path, max_images: int | None = 
 
     reference_dir = work_dir / "reference"
     reference_dir.mkdir(parents=True, exist_ok=True)
-    return [_prepare_reference(path, reference_dir) for path in candidates]
+    records: list[ImageRecord] = []
+    for path in candidates:
+        if not _is_image(path):
+            records.append(_unsupported_record(path, f"unsupported extension: {path.suffix or '<none>'}"))
+            continue
+        try:
+            records.append(_prepare_reference(path, reference_dir))
+        except (UnidentifiedImageError, OSError, ValueError) as error:
+            records.append(_unsupported_record(path, _short_error(str(error) or error.__class__.__name__)))
+    return records
 
 
 def _prepare_reference(source_path: Path, reference_dir: Path) -> ImageRecord:
@@ -113,6 +123,21 @@ def _prepare_reference(source_path: Path, reference_dir: Path) -> ImageRecord:
         source_format=source_format,
         has_alpha=has_alpha,
         bit_depth=bit_depth,
+    )
+
+
+def _unsupported_record(source_path: Path, reason: str) -> ImageRecord:
+    return ImageRecord(
+        image_id=_image_id(source_path),
+        source_path=source_path,
+        reference_path=None,
+        width=0,
+        height=0,
+        mode="unsupported",
+        source_format=source_path.suffix.lstrip(".").upper() or "UNKNOWN",
+        has_alpha=False,
+        bit_depth=None,
+        unsupported_reason=reason,
     )
 
 
@@ -157,3 +182,7 @@ def _bit_depth(image: Image.Image) -> int | None:
     if image.mode in {"L", "LA", "P", "RGB", "RGBA"}:
         return 8
     return None
+
+
+def _short_error(value: str) -> str:
+    return value.strip().replace("\n", " ")[:400]

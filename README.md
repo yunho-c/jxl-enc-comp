@@ -70,6 +70,10 @@ types are normalized through Pillow. This keeps the suite focused on
 pixel-encoding parity and avoids mixing libjxl's JPEG transcoding path into
 `jxl-encoder` comparisons.
 
+Files with image-like extensions that Pillow cannot read are kept in the report
+as `skipped` cases with an `unsupported input format` reason, rather than
+aborting the whole corpus run.
+
 For each image, mode, distance, effort, and encoder, the suite records:
 
 - encode/decode success

@@ -44,6 +44,35 @@ class RunnerTests(unittest.TestCase):
             self.assertTrue((out_dir / "feature_coverage.md").exists())
             self.assertFalse((out_dir / "work").exists())
 
+    def test_unsupported_inputs_are_reported_as_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            out_dir = root / "out"
+            corpus.mkdir()
+            (corpus / "bad.jpg").write_bytes(b"not a real jpeg")
+
+            summary = run_suite(
+                RunConfig(
+                    corpus=[corpus],
+                    out_dir=out_dir,
+                    cjxl="definitely-missing-cjxl",
+                    djxl="definitely-missing-djxl",
+                    jxl_encoder="definitely-missing-cjxl-rs",
+                    modes=["lossless"],
+                    distances=[1.0],
+                    efforts=[1],
+                    max_images=None,
+                    metrics=["psnr"],
+                    keep_work=False,
+                )
+            )
+
+            self.assertEqual(summary.total_cases, 2)
+            self.assertEqual(summary.skipped_cases, 2)
+            results = (out_dir / "per_image_results.csv").read_text(encoding="utf-8")
+            self.assertIn("unsupported input format", results)
+
     def test_visual_diff_paths_are_report_relative(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

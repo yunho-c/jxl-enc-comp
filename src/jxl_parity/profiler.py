@@ -55,6 +55,7 @@ class ProfileResult:
     image_mode: str
     has_alpha: bool
     bit_depth: int | None
+    unsupported_reason: str | None = None
     encoded_path: str | None = None
     encoded_bytes: int | None = None
     bits_per_pixel: float | None = None
@@ -158,7 +159,12 @@ def _profile_case(
         image_mode=image.mode,
         has_alpha=image.has_alpha,
         bit_depth=image.bit_depth,
+        unsupported_reason=image.unsupported_reason,
     )
+    if image.unsupported_reason is not None:
+        result.status = "skipped"
+        result.reason = f"unsupported input format: {image.unsupported_reason}"
+        return result
     if mode not in {"lossless", "vardct"}:
         result.status = "skipped"
         result.reason = f"unsupported mode: {mode}"
@@ -173,7 +179,7 @@ def _profile_case(
     encode_result = encode(
         encoder=encoder_name,
         command=encoder_command,
-        input_path=image.reference_path,
+        input_path=_reference_path(image),
         output_path=encoded_path,
         mode=mode,
         effort=effort,
@@ -317,3 +323,9 @@ def _case_id(image_id: str, encoder: str, mode: str, effort: int, distance: floa
 def _average(values: list[float | None]) -> float | None:
     numbers = [value for value in values if value is not None]
     return sum(numbers) / len(numbers) if numbers else None
+
+
+def _reference_path(image: ImageRecord) -> Path:
+    if image.reference_path is None:
+        raise ValueError(f"image has no reference path: {image.source_path}")
+    return image.reference_path

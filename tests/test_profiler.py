@@ -56,6 +56,38 @@ class ProfilerTests(unittest.TestCase):
             self.assertTrue((out_dir / "profile_runs.csv").exists())
             self.assertIn("perf record", (out_dir / "profiler_commands.md").read_text(encoding="utf-8"))
 
+    def test_profile_reports_unsupported_inputs_as_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            out_dir = root / "profile"
+            corpus.mkdir()
+            (corpus / "bad.jpg").write_bytes(b"not a real jpeg")
+
+            with patch("jxl_parity.profiler.encode") as fake_encode:
+                summary = run_profile(
+                    ProfileConfig(
+                        corpus=[corpus],
+                        out_dir=out_dir,
+                        cjxl="definitely-missing-cjxl",
+                        jxl_encoder="definitely-missing-cjxl-rs",
+                        encoder="jxl-encoder",
+                        modes=["lossless"],
+                        distances=[1.0],
+                        efforts=[7],
+                        max_images=None,
+                        keep_work=False,
+                        instrument_stages=False,
+                    )
+                )
+
+            self.assertEqual(summary.skipped_cases, 1)
+            fake_encode.assert_not_called()
+            self.assertIn(
+                "unsupported input format",
+                (out_dir / "profile_runs.csv").read_text(encoding="utf-8"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

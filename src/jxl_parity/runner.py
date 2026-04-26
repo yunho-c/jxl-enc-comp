@@ -62,6 +62,7 @@ class CaseResult:
     image_mode: str
     has_alpha: bool
     bit_depth: int | None
+    unsupported_reason: str | None = None
     encoded_path: str | None = None
     decoded_path: str | None = None
     encoded_bytes: int | None = None
@@ -185,6 +186,10 @@ def _run_case(
     diff_dir: Path,
 ) -> CaseResult:
     result = _base_result(image, encoder_name, mode, effort, distance)
+    if image.unsupported_reason is not None:
+        result.status = "skipped"
+        result.reason = f"unsupported input format: {image.unsupported_reason}"
+        return result
     if mode not in {"lossless", "vardct"}:
         result.status = "skipped"
         result.reason = f"unsupported mode: {mode}"
@@ -207,7 +212,7 @@ def _run_case(
     encode_result = encode(
         encoder=encoder_name,
         command=encoder_command,
-        input_path=image.reference_path,
+        input_path=_reference_path(image),
         output_path=encoded_path,
         mode=mode,
         effort=effort,
@@ -232,7 +237,7 @@ def _run_case(
         result.stderr = _short_error(decode_result.stderr)
         return result
 
-    pixel_comparison = compare_pixels(image.reference_path, decoded_path)
+    pixel_comparison = compare_pixels(_reference_path(image), decoded_path)
     result.psnr = pixel_comparison.psnr
     result.decoded_same_size = pixel_comparison.same_size
     result.decoded_same_mode = pixel_comparison.same_mode
@@ -261,13 +266,13 @@ def _run_case(
 
     if result.status == "passed" and mode != "lossless":
         if "ssimulacra2" in config.metrics:
-            result.ssimulacra2 = compute_external_metric("ssimulacra2", image.reference_path, decoded_path)
+            result.ssimulacra2 = compute_external_metric("ssimulacra2", _reference_path(image), decoded_path)
         if "butteraugli" in config.metrics:
-            result.butteraugli = compute_external_metric("butteraugli", image.reference_path, decoded_path)
+            result.butteraugli = compute_external_metric("butteraugli", _reference_path(image), decoded_path)
 
     if _needs_visual_diff(result):
         diff_path = diff_dir / f"{case_id}.png"
-        if write_visual_diff(image.reference_path, decoded_path, diff_path):
+        if write_visual_diff(_reference_path(image), decoded_path, diff_path):
             result.visual_diff_path = str(diff_path.relative_to(diff_dir.parent))
 
     return result
@@ -296,6 +301,7 @@ def _base_result(
         image_mode=image.mode,
         has_alpha=image.has_alpha,
         bit_depth=image.bit_depth,
+        unsupported_reason=image.unsupported_reason,
     )
 
 
@@ -329,3 +335,9 @@ def _needs_visual_diff(result: CaseResult) -> bool:
         if result.psnr is not None and result.psnr < 30:
             return True
     return False
+
+
+def _reference_path(image: ImageRecord) -> Path:
+    if image.reference_path is None:
+        raise ValueError(f"image has no reference path: {image.source_path}")
+    return image.reference_path

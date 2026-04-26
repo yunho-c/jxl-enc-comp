@@ -62,6 +62,20 @@ class CorpusTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "no image files found"):
                 discover_images([corpus], work)
 
+    def test_corrupt_image_is_reported_as_unsupported_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            work = root / "work"
+            corpus.mkdir()
+            (corpus / "bad.jpg").write_bytes(b"not a real jpeg")
+
+            [record] = discover_images([corpus], work)
+
+            self.assertIsNone(record.reference_path)
+            self.assertEqual(record.mode, "unsupported")
+            self.assertIsNotNone(record.unsupported_reason)
+
 
 if __name__ == "__main__":
     unittest.main()
