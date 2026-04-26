@@ -51,6 +51,17 @@ class CorpusTests(unittest.TestCase):
             self.assertEqual(modes["palette.png"], "RGB")
             self.assertEqual(modes["one-bit.png"], "L")
 
+    def test_empty_corpus_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            work = root / "work"
+            corpus.mkdir()
+            (corpus / "notes.txt").write_text("not an image", encoding="utf-8")
+
+            with self.assertRaisesRegex(FileNotFoundError, "no image files found"):
+                discover_images([corpus], work)
+
 
 if __name__ == "__main__":
     unittest.main()

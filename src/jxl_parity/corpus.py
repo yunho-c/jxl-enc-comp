@@ -68,6 +68,9 @@ def discover_images(paths: list[Path], work_dir: Path, max_images: int | None = 
     candidates = sorted(dict.fromkeys(candidates))
     if max_images is not None:
         candidates = candidates[:max_images]
+    if not candidates:
+        searched = ", ".join(str(path.expanduser()) for path in inputs)
+        raise FileNotFoundError(f"no image files found in corpus paths: {searched}")
 
     reference_dir = work_dir / "reference"
     reference_dir.mkdir(parents=True, exist_ok=True)

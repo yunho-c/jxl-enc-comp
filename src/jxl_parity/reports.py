@@ -8,16 +8,46 @@ from pathlib import Path
 from typing import Iterable
 
 
+PAIRED_COMPARISON_FIELDS = [
+    "image_id",
+    "source_path",
+    "mode",
+    "distance",
+    "effort",
+    "libjxl_status",
+    "jxl_encoder_status",
+    "libjxl_bpp",
+    "jxl_encoder_bpp",
+    "bpp_ratio_jxl_encoder_to_libjxl",
+    "libjxl_psnr",
+    "jxl_encoder_psnr",
+    "psnr_delta_jxl_encoder_minus_libjxl",
+    "libjxl_ssimulacra2",
+    "jxl_encoder_ssimulacra2",
+    "ssimulacra2_delta_jxl_encoder_minus_libjxl",
+    "libjxl_butteraugli",
+    "jxl_encoder_butteraugli",
+    "butteraugli_delta_jxl_encoder_minus_libjxl",
+    "libjxl_encode_seconds_per_mp",
+    "jxl_encoder_encode_seconds_per_mp",
+    "encode_time_ratio_jxl_encoder_to_libjxl",
+]
+
+
 def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
 
-def write_csv(path: Path, rows: Iterable[dict[str, object]]) -> None:
+def write_csv(path: Path, rows: Iterable[dict[str, object]], fieldnames: list[str] | None = None) -> None:
     rows = list(rows)
     if not rows:
-        path.write_text("", encoding="utf-8")
+        if fieldnames is None:
+            path.write_text("", encoding="utf-8")
+            return
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            csv.DictWriter(handle, fieldnames=fieldnames).writeheader()
         return
-    fieldnames = list(rows[0].keys())
+    fieldnames = fieldnames or list(rows[0].keys())
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -197,7 +227,7 @@ def write_summary_csv(path: Path, rows: list[dict[str, object]]) -> None:
 
 
 def write_paired_comparisons(path: Path, rows: list[dict[str, object]]) -> None:
-    write_csv(path, _paired_comparison_rows(rows))
+    write_csv(path, _paired_comparison_rows(rows), PAIRED_COMPARISON_FIELDS)
 
 
 def write_corpus_manifest(path: Path, rows: list[dict[str, object]]) -> None:

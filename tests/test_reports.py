@@ -9,6 +9,16 @@ from jxl_parity.reports import write_paired_comparisons
 
 
 class ReportTests(unittest.TestCase):
+    def test_empty_paired_comparisons_keeps_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "paired.csv"
+
+            write_paired_comparisons(output, [])
+
+            header = output.read_text(encoding="utf-8").splitlines()[0]
+            self.assertIn("image_id", header)
+            self.assertIn("encode_time_ratio_jxl_encoder_to_libjxl", header)
+
     def test_paired_comparisons_compute_ratios_and_deltas(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "paired.csv"

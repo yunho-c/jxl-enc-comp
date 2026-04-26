@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -78,7 +79,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             metrics=_csv(args.metrics),
             keep_work=args.keep_work,
         )
-        summary = run_suite(config)
+        try:
+            summary = run_suite(config)
+        except FileNotFoundError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
         print(f"Wrote reports to {summary.out_dir}")
         print(
             f"cases={summary.total_cases} passed={summary.passed_cases} "
@@ -96,4 +101,3 @@ def _csv(value: str) -> list[str]:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
