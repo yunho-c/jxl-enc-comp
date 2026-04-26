@@ -5,8 +5,9 @@ with the Rust `jxl-encoder` CLI (`cjxl-rs`).
 
 The suite is intentionally output-oriented: it does not compare encoded `.jxl`
 bytes. It encodes inputs with each encoder, decodes the outputs through
-`djxl`, checks metadata and lossless round trips, records size/timing, computes
-optional quality metrics, and emits CSV, JSON, Markdown, and HTML reports.
+`djxl`, checks decoded dimensions/channel mode and lossless round trips,
+records size/timing, computes optional quality metrics, and emits CSV, JSON,
+Markdown, and HTML reports.
 
 ## Quick Start
 
@@ -66,7 +67,7 @@ transcoding path into `jxl-encoder` comparisons.
 For each image, mode, distance, effort, and encoder, the suite records:
 
 - encode/decode success
-- decoded dimensions and pixel comparison
+- decoded dimensions, channel mode, and pixel comparison
 - lossless pixel equality
 - encoded bytes and bits per pixel
 - encode/decode time

@@ -70,6 +70,9 @@ class CaseResult:
     psnr: float | None = None
     ssimulacra2: float | None = None
     butteraugli: float | None = None
+    decoded_same_size: bool | None = None
+    decoded_same_mode: bool | None = None
+    decoded_mode: str | None = None
     equal_pixels: bool | None = None
     max_channel_delta: int | None = None
     visual_diff_path: str | None = None
@@ -229,17 +232,32 @@ def _run_case(
 
     pixel_comparison = compare_pixels(image.reference_path, decoded_path)
     result.psnr = pixel_comparison.psnr
+    result.decoded_same_size = pixel_comparison.same_size
+    result.decoded_same_mode = pixel_comparison.same_mode
+    result.decoded_mode = pixel_comparison.decoded_mode
     result.equal_pixels = pixel_comparison.equal_pixels
     result.max_channel_delta = pixel_comparison.max_channel_delta
 
-    if mode == "lossless" and not pixel_comparison.equal_pixels:
+    if not pixel_comparison.same_size:
+        result.status = "failed"
+        result.reason = (
+            f"decoded dimensions mismatch: expected {pixel_comparison.reference_size}, "
+            f"got {pixel_comparison.decoded_size}"
+        )
+    elif not pixel_comparison.same_mode:
+        result.status = "failed"
+        result.reason = (
+            f"decoded mode mismatch: expected {pixel_comparison.reference_mode}, "
+            f"got {pixel_comparison.decoded_mode}"
+        )
+    elif mode == "lossless" and not pixel_comparison.equal_pixels:
         result.status = "failed"
         result.reason = "lossless pixel mismatch"
     else:
         result.status = "passed"
         result.reason = "ok"
 
-    if mode != "lossless":
+    if result.status == "passed" and mode != "lossless":
         if "ssimulacra2" in config.metrics:
             result.ssimulacra2 = compute_external_metric("ssimulacra2", image.reference_path, decoded_path)
         if "butteraugli" in config.metrics:

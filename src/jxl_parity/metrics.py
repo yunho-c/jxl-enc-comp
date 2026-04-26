@@ -17,14 +17,32 @@ class PixelComparison:
     equal_pixels: bool
     max_channel_delta: int | None
     psnr: float | None
+    reference_mode: str
+    decoded_mode: str
+    reference_size: tuple[int, int]
+    decoded_size: tuple[int, int]
 
 
 def compare_pixels(reference_path: Path, decoded_path: Path) -> PixelComparison:
     with Image.open(reference_path) as reference, Image.open(decoded_path) as decoded:
-        same_size = reference.size == decoded.size
-        same_mode = reference.mode == decoded.mode
+        reference_mode = reference.mode
+        decoded_mode = decoded.mode
+        reference_size = reference.size
+        decoded_size = decoded.size
+        same_size = reference_size == decoded_size
+        same_mode = reference_mode == decoded_mode
         if not same_size:
-            return PixelComparison(False, same_mode, False, None, None)
+            return PixelComparison(
+                same_size=False,
+                same_mode=same_mode,
+                equal_pixels=False,
+                max_channel_delta=None,
+                psnr=None,
+                reference_mode=reference_mode,
+                decoded_mode=decoded_mode,
+                reference_size=reference_size,
+                decoded_size=decoded_size,
+            )
 
         if reference.mode != decoded.mode:
             decoded = decoded.convert(reference.mode)
@@ -40,7 +58,17 @@ def compare_pixels(reference_path: Path, decoded_path: Path) -> PixelComparison:
 
         mse = _mse(reference, decoded)
         psnr = math.inf if mse == 0 else 20 * math.log10(255.0 / math.sqrt(mse))
-        return PixelComparison(same_size, same_mode, max_delta == 0, max_delta, psnr)
+        return PixelComparison(
+            same_size=same_size,
+            same_mode=same_mode,
+            equal_pixels=max_delta == 0,
+            max_channel_delta=max_delta,
+            psnr=psnr,
+            reference_mode=reference_mode,
+            decoded_mode=decoded_mode,
+            reference_size=reference_size,
+            decoded_size=decoded_size,
+        )
 
 
 def compute_external_metric(metric: str, reference_path: Path, decoded_path: Path) -> float | None:
