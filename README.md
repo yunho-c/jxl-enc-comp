@@ -144,6 +144,12 @@ cases and compare them with the parity report before treating a hot
 ## Tests
 
 ```bash
+just test
+```
+
+Without `just`, run the underlying command directly:
+
+```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
