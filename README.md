@@ -117,6 +117,7 @@ the decode and quality-metric pass:
 jxl-parity profile \
   --encoder jxl-encoder \
   --instrument-stages \
+  --max-images 5 \
   --corpus ~/GitHub/test_images \
   --modes lossless,vardct \
   --distances 1.0,2.0 \
