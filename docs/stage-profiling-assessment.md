@@ -2,6 +2,12 @@
 
 ## Short Answer
 
+Yes. The viable shape is to keep `encode_total` as the outer wall-clock
+reference, report fine-grained encoder spans as flat leaf stages, and treat the
+older coarse names as grouping metadata rather than simultaneously measured
+parent spans. That gives useful granularity without double-counting parent and
+child timings in the current sidecar schema.
+
 The profiling setup can report real `jxl-encoder` stage timings when it is run
 with an instrumented `cjxl-rs` build that exposes `--stage-timing-json`. In that
 case, `jxl-parity profile --instrument-stages` writes a per-sample sidecar path,
@@ -51,7 +57,7 @@ stages.
 ## What The Instrumented Rust Encoder Exposes
 
 The instrumented `jxl-encoder` fork exposes timing data through `cjxl-rs
---stage-timing-json <file>` and reports these stable stages:
+--stage-timing-json <file>` and currently reports these coarse stable stages:
 
 - `color_xyb`
 - `block_stats`
@@ -66,9 +72,71 @@ Stock `cjxl-rs` builds still expose output size, mode, strategy counts,
 gaborish, ANS, loop count, and pixel-domain-loss flags, but no timings. The
 Python harness cannot infer named internal spans from those binaries alone.
 
-## Stage Map
+## Granularity Model
 
-A practical first-pass stage schema should be small and stable:
+Do not replace `encode_total`. It is the only timing that includes CLI startup,
+I/O, normalization handoff, sidecar overhead, and any unattributed encoder work.
+
+For internal spans, prefer a flat leaf-stage sidecar. A sidecar that records both
+`ac_strategy_search` and nested `block_strategy`, `transform_selection`, and
+`adaptive_quantization` as measured stages would make named-stage totals exceed
+the instrumented work. If parent stages are needed later, add an explicit schema
+field such as `stage_group` or `parent_stage` and teach the harness how to
+aggregate it. Until then, keep parent groups as metadata only.
+
+This means the existing coarse names can remain accepted for old instrumented
+builds, while future builds can emit more granular leaf names. The harness
+already ingests arbitrary stage strings, so this is mostly a Rust
+instrumentation and documentation problem.
+
+## VarDCT Stage Map
+
+A practical VarDCT schema should use stable leaf stages and derive broader
+groups for reporting:
+
+| Requested area | Recommended leaf stage | Reporting group |
+| --- | --- | --- |
+| input conversion / pixel layout | `input_conversion`, `pixel_layout` | input_color |
+| color transform | `color_transform` | input_color |
+| LF image generation | `lf_image_generation` | vardct_frontend |
+| block strategy / transform selection | `block_strategy`, `transform_selection` | vardct_frontend |
+| adaptive quantization | `adaptive_quantization` | vardct_frontend |
+| DCT / coefficient generation | `dct_coefficient_generation` | vardct_coefficients |
+| chroma-from-luma | `chroma_from_luma` | vardct_coefficients |
+| gaborish / filtering simulation | `gaborish_filtering` | vardct_coefficients |
+| noise synthesis decisions | `noise_synthesis` | vardct_coefficients |
+| Butteraugli-guided rate control | `butteraugli_rate_control` | vardct_frontend |
+| coefficient tokenization | `coefficient_tokenization` | entropy |
+| histogram construction | `histogram_construction` | entropy |
+| histogram clustering | `histogram_clustering` | entropy |
+| ANS/Huffman encoding | `ans_huffman_encoding` | entropy |
+| bit writing | `bit_writing` | bitstream |
+| container/metadata wrapping | `container_metadata` | bitstream |
+
+## Modular Stage Map
+
+The Modular lossless path should use a sibling leaf-stage set rather than force
+the VarDCT stages onto a different pipeline:
+
+| Requested area | Recommended leaf stage | Reporting group |
+| --- | --- | --- |
+| input conversion | `input_conversion` | input_color |
+| color transform / reversible color transform | `color_transform`, `reversible_color_transform` | input_color |
+| predictor selection | `predictor_selection` | modular_modeling |
+| residual generation | `residual_generation` | modular_modeling |
+| palette / local palette decisions | `palette_decisions` | modular_modeling |
+| MA-tree / context modeling if present | `ma_tree_context_modeling` | modular_modeling |
+| histogram construction | `histogram_construction` | entropy |
+| histogram clustering | `histogram_clustering` | entropy |
+| LZ77 search | `lz77_search` | entropy |
+| ANS/Huffman encoding | `ans_huffman_encoding` | entropy |
+| bit writing | `bit_writing` | bitstream |
+| container/metadata wrapping | `container_metadata` | bitstream |
+
+## Current Coarse Stage Map
+
+For compatibility with already-instrumented builds, the existing coarse stages
+map into the same reporting groups:
 
 | Requested area | Proposed stage name | Likely Rust boundary |
 | --- | --- | --- |
