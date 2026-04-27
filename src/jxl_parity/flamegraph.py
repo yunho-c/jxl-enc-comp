@@ -82,15 +82,12 @@ def run_flamegraph(config: FlamegraphConfig) -> FlamegraphSummary:
     image = _first_supported_image(
         discover_images(config.corpus, work_dir, config.max_images)
     )
-    encoded_path = encoded_dir / f"{_case_id(image, config)}.jxl"
+    case_id = _case_id(image, config)
+    encoded_path = encoded_dir / f"{case_id}.jxl"
     svg_path = out_dir / "flamegraph.svg"
-    stage_timing_path = (
-        encoded_dir / f"{_case_id(image, config)}.stage-timing.json"
-        if stage_timing_supported
-        else None
-    )
-    if stage_timing_path is not None:
-        stage_timing_path.unlink(missing_ok=True)
+    stage_timing_candidate = encoded_dir / f"{case_id}.stage-timing.json"
+    stage_timing_path = stage_timing_candidate if stage_timing_supported else None
+    _clear_previous_outputs(svg_path, encoded_path, stage_timing_candidate)
 
     encoder_args = build_encode_args(
         encoder=config.encoder,
@@ -238,6 +235,11 @@ def _write_command_artifacts(
         "",
     ]
     (out_dir / "README.md").write_text("\n".join(notes), encoding="utf-8")
+
+
+def _clear_previous_outputs(*paths: Path) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
 
 
 def _first_supported_image(images: list[ImageRecord]) -> ImageRecord:

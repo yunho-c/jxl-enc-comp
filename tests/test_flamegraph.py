@@ -64,6 +64,75 @@ class FlamegraphTests(unittest.TestCase):
             self.assertIsNotNone(payload["stage_timing_path"])
             self.assertTrue(Path(payload["reference_path"]).exists())
 
+    def test_dry_run_clears_stale_output_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            out_dir = root / "flamegraph"
+            encoded_dir = out_dir / "work" / "encoded"
+            corpus.mkdir()
+            encoded_dir.mkdir(parents=True)
+            Image.new("RGB", (2, 2), (1, 2, 3)).save(corpus / "sample.png")
+
+            with (
+                patch("jxl_parity.flamegraph.tool_path", return_value="/bin/tool"),
+                patch("jxl_parity.flamegraph.tool_supports_option", return_value=True),
+                patch("jxl_parity.flamegraph.run_command"),
+            ):
+                summary = run_flamegraph(
+                    FlamegraphConfig(
+                        corpus=[corpus],
+                        out_dir=out_dir,
+                        cjxl="cjxl",
+                        jxl_encoder="cjxl-rs",
+                        encoder="jxl-encoder",
+                        mode="vardct",
+                        distance=1.0,
+                        effort=7,
+                        max_images=1,
+                        flamegraph="flamegraph",
+                        dry_run=True,
+                        instrument_stages=True,
+                    )
+                )
+
+            stage_timing_path = summary.stage_timing_path
+            self.assertIsNotNone(stage_timing_path)
+            stale_paths = [
+                Path(summary.svg_path),
+                Path(summary.encoded_path),
+                Path(stage_timing_path),
+            ]
+            for path in stale_paths:
+                path.write_text("stale", encoding="utf-8")
+
+            with (
+                patch("jxl_parity.flamegraph.tool_path", return_value="/bin/tool"),
+                patch("jxl_parity.flamegraph.tool_supports_option", return_value=True),
+                patch("jxl_parity.flamegraph.run_command") as fake_run,
+            ):
+                rerun_summary = run_flamegraph(
+                    FlamegraphConfig(
+                        corpus=[corpus],
+                        out_dir=out_dir,
+                        cjxl="cjxl",
+                        jxl_encoder="cjxl-rs",
+                        encoder="jxl-encoder",
+                        mode="vardct",
+                        distance=1.0,
+                        effort=7,
+                        max_images=1,
+                        flamegraph="flamegraph",
+                        dry_run=True,
+                        instrument_stages=True,
+                    )
+                )
+
+            fake_run.assert_not_called()
+            self.assertEqual(rerun_summary.status, "prepared")
+            for path in stale_paths:
+                self.assertFalse(path.exists())
+
     def test_runs_flamegraph_around_libjxl_lossless_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
