@@ -16,6 +16,16 @@ python3 -m pip install -e .
 jxl-parity run --out reports/parity
 ```
 
+From a checkout, the same suite can be run through `just` without installing
+the console script first:
+
+```bash
+just parity
+```
+
+Additional `jxl-parity run` flags can be passed after the recipe name, for
+example `just parity --max-images 3 --modes lossless`.
+
 By default the runner looks for local sample corpora at:
 
 - `~/GitHub/Kodak-Lossless-True-Color-Image-Suite`
@@ -42,6 +52,12 @@ Use `--max-images` for a smoke run:
 
 ```bash
 jxl-parity run --max-images 3 --modes lossless --efforts 1 --out reports/smoke
+```
+
+The same smoke run is available as:
+
+```bash
+just parity-smoke
 ```
 
 Run a lossy sweep with several distances and efforts:
