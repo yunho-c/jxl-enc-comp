@@ -23,7 +23,10 @@ class FlamegraphTests(unittest.TestCase):
             Image.new("RGB", (2, 2), (1, 2, 3)).save(corpus / "sample.png")
 
             with (
-                patch("jxl_parity.flamegraph.tool_path", return_value="/bin/tool"),
+                patch(
+                    "jxl_parity.flamegraph.tool_path",
+                    side_effect=lambda command: f"/usr/local/bin/{command}",
+                ),
                 patch("jxl_parity.flamegraph.tool_supports_option", return_value=True),
                 patch("jxl_parity.flamegraph.run_command") as fake_run,
             ):
@@ -52,7 +55,10 @@ class FlamegraphTests(unittest.TestCase):
             self.assertIn("--stage-timing-json", summary.encoder_command)
             self.assertTrue((out_dir / "run_flamegraph.sh").exists())
             script = (out_dir / "run_flamegraph.sh").read_text(encoding="utf-8")
-            self.assertIn(f"cd {shlex.quote(str(Path.cwd()))}", script)
+            self.assertIn(
+                f"cd {shlex.quote(str((out_dir / 'flamegraph-run').resolve()))}",
+                script,
+            )
             self.assertTrue((out_dir / "encoder_command.txt").exists())
             self.assertTrue((out_dir / "flamegraph_command.txt").exists())
             self.assertTrue((out_dir / "README.md").exists())
@@ -141,13 +147,18 @@ class FlamegraphTests(unittest.TestCase):
             corpus.mkdir()
             Image.new("RGB", (2, 2), (1, 2, 3)).save(corpus / "sample.png")
             commands: list[list[str]] = []
+            working_dirs: list[Path | None] = []
 
-            def fake_run(args: list[str]) -> CommandResult:
+            def fake_run(args: list[str], cwd: Path | None = None) -> CommandResult:
                 commands.append(args)
+                working_dirs.append(cwd)
                 return CommandResult(args, 0, 0.25, "", "")
 
             with (
-                patch("jxl_parity.flamegraph.tool_path", return_value="/bin/tool"),
+                patch(
+                    "jxl_parity.flamegraph.tool_path",
+                    side_effect=lambda command: f"/usr/local/bin/{command}",
+                ),
                 patch("jxl_parity.flamegraph.run_command", side_effect=fake_run),
             ):
                 summary = run_flamegraph(
@@ -170,12 +181,59 @@ class FlamegraphTests(unittest.TestCase):
             self.assertEqual(summary.status, "completed")
             self.assertEqual(summary.returncode, 0)
             self.assertEqual(
-                commands[0][0:4],
-                ["flamegraph", "-o", str(out_dir / "flamegraph.svg"), "--"],
+                commands[0][0:2],
+                ["flamegraph", "-o"],
             )
-            self.assertIn("cjxl", commands[0])
+            self.assertEqual(Path(commands[0][2]), (out_dir / "flamegraph.svg").resolve())
+            self.assertEqual(commands[0][3], "--")
+            self.assertEqual(working_dirs[0], out_dir / "flamegraph-run")
+            self.assertIn("/usr/local/bin/cjxl", commands[0])
             self.assertIn("-d", commands[0])
             self.assertIn("0.0", commands[0])
+
+    def test_runs_from_isolated_directory_and_clears_stale_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            out_dir = root / "flamegraph"
+            trace_dir = out_dir / "flamegraph-run" / "cargo-flamegraph.trace"
+            corpus.mkdir()
+            trace_dir.mkdir(parents=True)
+            (trace_dir / "stale").write_text("stale", encoding="utf-8")
+            Image.new("RGB", (2, 2), (1, 2, 3)).save(corpus / "sample.png")
+            working_dirs: list[Path | None] = []
+
+            def fake_run(args: list[str], cwd: Path | None = None) -> CommandResult:
+                working_dirs.append(cwd)
+                self.assertFalse(trace_dir.exists())
+                return CommandResult(args, 0, 0.25, "", "")
+
+            with (
+                patch(
+                    "jxl_parity.flamegraph.tool_path",
+                    side_effect=lambda command: f"/usr/local/bin/{command}",
+                ),
+                patch("jxl_parity.flamegraph.run_command", side_effect=fake_run),
+            ):
+                summary = run_flamegraph(
+                    FlamegraphConfig(
+                        corpus=[corpus],
+                        out_dir=out_dir,
+                        cjxl="cjxl",
+                        jxl_encoder="cjxl-rs",
+                        encoder="libjxl",
+                        mode="lossless",
+                        distance=None,
+                        effort=3,
+                        max_images=1,
+                        flamegraph="flamegraph",
+                        dry_run=False,
+                        instrument_stages=False,
+                    )
+                )
+
+            self.assertEqual(summary.status, "completed")
+            self.assertEqual(working_dirs, [out_dir / "flamegraph-run"])
 
 
 if __name__ == "__main__":

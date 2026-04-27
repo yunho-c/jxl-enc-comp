@@ -230,6 +230,42 @@ class CliTests(unittest.TestCase):
         self.assertIn("status=prepared image=sample", stdout.getvalue())
         self.assertIn("command=flamegraph -o", stdout.getvalue())
 
+    def test_flamegraph_failure_reports_stderr_detail(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        summary = FlamegraphSummary(
+            out_dir=Path("reports/flamegraph"),
+            image_id="sample",
+            source_path="sample.png",
+            reference_path="reports/flamegraph/work/reference/sample.png",
+            encoded_path="reports/flamegraph/work/encoded/sample.jxl",
+            svg_path="reports/flamegraph/flamegraph.svg",
+            stage_timing_path=None,
+            encoder="jxl-encoder",
+            mode="vardct",
+            distance=1.0,
+            effort=7,
+            status="failed",
+            reason="flamegraph command failed",
+            returncode=1,
+            elapsed_seconds=0.1,
+            encoder_command="cjxl-rs input.png output.jxl -e 7 -d 1.0",
+            profiler_command="flamegraph -o flamegraph.svg -- cjxl-rs input.png output.jxl",
+            tool_status={"encoder": True, "flamegraph": True},
+            stderr="Path not found 'cjxl-rs'",
+        )
+
+        with (
+            patch("jxl_parity.cli.run_flamegraph", return_value=summary),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = main(["flamegraph"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("status=failed image=sample", stdout.getvalue())
+        self.assertIn("error_detail=Path not found 'cjxl-rs'", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

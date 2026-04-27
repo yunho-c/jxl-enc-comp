@@ -113,9 +113,11 @@ def decode(djxl: str, input_path: Path, output_path: Path) -> CommandResult:
     return run_command([djxl, str(input_path), str(output_path)])
 
 
-def run_command(args: list[str]) -> CommandResult:
+def run_command(args: list[str], cwd: Path | None = None) -> CommandResult:
     start = time.perf_counter()
-    completed = subprocess.run(args, capture_output=True, text=True, check=False)
+    completed = subprocess.run(
+        args, cwd=cwd, capture_output=True, text=True, check=False
+    )
     elapsed = time.perf_counter() - start
     return CommandResult(
         command=args,

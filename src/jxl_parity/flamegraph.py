@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -57,14 +58,17 @@ class FlamegraphSummary:
 def run_flamegraph(config: FlamegraphConfig) -> FlamegraphSummary:
     out_dir = config.out_dir
     work_dir = out_dir / "work"
+    run_dir = out_dir / "flamegraph-run"
     encoded_dir = work_dir / "encoded"
-    for directory in (out_dir, work_dir, encoded_dir):
+    for directory in (out_dir, work_dir, run_dir, encoded_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     encoder_command = config.cjxl if config.encoder == "libjxl" else config.jxl_encoder
+    encoder_path = tool_path(encoder_command)
+    flamegraph_path = tool_path(config.flamegraph)
     tool_status = {
-        "encoder": tool_path(encoder_command) is not None,
-        "flamegraph": tool_path(config.flamegraph) is not None,
+        "encoder": encoder_path is not None,
+        "flamegraph": flamegraph_path is not None,
     }
     stage_timing_supported = (
         config.instrument_stages
@@ -87,20 +91,29 @@ def run_flamegraph(config: FlamegraphConfig) -> FlamegraphSummary:
     svg_path = out_dir / "flamegraph.svg"
     stage_timing_candidate = encoded_dir / f"{case_id}.stage-timing.json"
     stage_timing_path = stage_timing_candidate if stage_timing_supported else None
-    _clear_previous_outputs(svg_path, encoded_path, stage_timing_candidate)
+    trace_path = run_dir / "cargo-flamegraph.trace"
+    _clear_previous_outputs(svg_path, encoded_path, stage_timing_candidate, trace_path)
 
     encoder_args = build_encode_args(
         encoder=config.encoder,
-        command=encoder_command,
-        input_path=_reference_path(image),
-        output_path=encoded_path,
+        command=encoder_path or encoder_command,
+        input_path=_absolute_path(_reference_path(image)),
+        output_path=_absolute_path(encoded_path),
         mode=config.mode,
         effort=config.effort,
         distance=config.distance,
-        stage_timing_path=stage_timing_path,
+        stage_timing_path=_absolute_path(stage_timing_path)
+        if stage_timing_path is not None
+        else None,
     )
-    profiler_args = [config.flamegraph, "-o", str(svg_path), "--", *encoder_args]
-    _write_command_artifacts(out_dir, encoder_args, profiler_args)
+    profiler_args = [
+        config.flamegraph,
+        "-o",
+        str(_absolute_path(svg_path)),
+        "--",
+        *encoder_args,
+    ]
+    _write_command_artifacts(out_dir, run_dir, encoder_args, profiler_args)
 
     if config.dry_run:
         summary = _summary(
@@ -121,7 +134,7 @@ def run_flamegraph(config: FlamegraphConfig) -> FlamegraphSummary:
         _write_summary(out_dir, summary)
         return summary
 
-    result = run_command(profiler_args)
+    result = run_command(profiler_args, cwd=run_dir)
     summary = _summary(
         config=config,
         image=image,
@@ -185,11 +198,11 @@ def _write_summary(out_dir: Path, summary: FlamegraphSummary) -> None:
 
 
 def _write_command_artifacts(
-    out_dir: Path, encoder_args: list[str], profiler_args: list[str]
+    out_dir: Path, run_dir: Path, encoder_args: list[str], profiler_args: list[str]
 ) -> None:
     encoder_command = _shell_join(encoder_args)
     profiler_command = _shell_join(profiler_args)
-    working_directory = _shell_join([Path.cwd()])
+    working_directory = _shell_join([_absolute_path(run_dir)])
     (out_dir / "encoder_command.txt").write_text(
         f"{encoder_command}\n", encoding="utf-8"
     )
@@ -226,6 +239,7 @@ def _write_command_artifacts(
         "- `flamegraph_summary.json`: selected image, command, status, and tool metadata.",
         "- `work/reference/`: normalized PNG input used by the encoder.",
         "- `work/encoded/`: generated `.jxl` output and optional stage sidecar.",
+        "- `flamegraph-run/`: isolated working directory for profiler trace files.",
         "",
         "For Rust binaries, prefer release builds with frame pointers, for example:",
         "",
@@ -239,7 +253,10 @@ def _write_command_artifacts(
 
 def _clear_previous_outputs(*paths: Path) -> None:
     for path in paths:
-        path.unlink(missing_ok=True)
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
 
 
 def _first_supported_image(images: list[ImageRecord]) -> ImageRecord:
@@ -265,6 +282,10 @@ def _reference_path(image: ImageRecord) -> Path:
     if image.reference_path is None:
         raise ValueError(f"image has no reference path: {image.source_path}")
     return image.reference_path
+
+
+def _absolute_path(path: Path) -> Path:
+    return path.expanduser().resolve()
 
 
 def _shell_join(parts: list[object]) -> str:
