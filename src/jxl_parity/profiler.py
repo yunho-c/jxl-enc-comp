@@ -5,9 +5,12 @@ import json
 import shutil
 import shlex
 import statistics
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
+
+from tqdm import tqdm
 
 from .codecs import encode, tool_path, tool_supports_option
 from .corpus import ImageRecord, discover_images
@@ -140,39 +143,48 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
     images = discover_images(config.corpus, work_dir, config.max_images)
     results: list[ProfileResult] = []
     samples: list[ProfileSample] = []
+    progress_total = _profile_progress_total(images, config, requested_encoders)
 
-    for image in images:
-        for mode in config.modes:
-            distances = [None] if mode == "lossless" else config.distances
-            for effort in config.efforts:
-                for distance in distances:
-                    for encoder_name in requested_encoders:
-                        command = (
-                            config.cjxl
-                            if encoder_name == "libjxl"
-                            else config.jxl_encoder
-                        )
-                        available = (
-                            tool_status["cjxl"]
-                            if encoder_name == "libjxl"
-                            else tool_status["jxl_encoder"]
-                        )
-                        result, case_samples = _profile_case(
-                            image=image,
-                            encoder_name=encoder_name,
-                            encoder_command=command,
-                            encoder_available=available,
-                            mode=mode,
-                            effort=effort,
-                            distance=distance,
-                            encoded_dir=encoded_dir,
-                            samples=config.samples,
-                            warmups=config.warmups,
-                            instrument_stages=config.instrument_stages,
-                            stage_timing_supported=stage_timing_supported,
-                        )
-                        results.append(result)
-                        samples.extend(case_samples)
+    with tqdm(
+        total=progress_total,
+        desc="Profiling",
+        unit="encode",
+        dynamic_ncols=True,
+        disable=None,
+    ) as progress:
+        for image in images:
+            for mode in config.modes:
+                distances = [None] if mode == "lossless" else config.distances
+                for effort in config.efforts:
+                    for distance in distances:
+                        for encoder_name in requested_encoders:
+                            command = (
+                                config.cjxl
+                                if encoder_name == "libjxl"
+                                else config.jxl_encoder
+                            )
+                            available = (
+                                tool_status["cjxl"]
+                                if encoder_name == "libjxl"
+                                else tool_status["jxl_encoder"]
+                            )
+                            result, case_samples = _profile_case(
+                                image=image,
+                                encoder_name=encoder_name,
+                                encoder_command=command,
+                                encoder_available=available,
+                                mode=mode,
+                                effort=effort,
+                                distance=distance,
+                                encoded_dir=encoded_dir,
+                                samples=config.samples,
+                                warmups=config.warmups,
+                                instrument_stages=config.instrument_stages,
+                                stage_timing_supported=stage_timing_supported,
+                                progress_update=progress.update,
+                            )
+                            results.append(result)
+                            samples.extend(case_samples)
 
     tool_status["jxl_encoder_stage_timing_ingested"] = any(
         _stage_timing_samples(result) for result in results
@@ -234,7 +246,21 @@ def _profile_case(
     warmups: int,
     instrument_stages: bool,
     stage_timing_supported: bool,
+    progress_update: Callable[[int], object] | None = None,
 ) -> tuple[ProfileResult, list[ProfileSample]]:
+    planned_invocations = warmups + samples
+    completed_invocations = 0
+
+    def mark_progress(count: int = 1) -> None:
+        nonlocal completed_invocations
+        completed_invocations += count
+        _advance_progress(progress_update, count)
+
+    def complete_planned_progress() -> None:
+        remaining = planned_invocations - completed_invocations
+        if remaining > 0:
+            mark_progress(remaining)
+
     result = ProfileResult(
         image_id=image.image_id,
         source_path=str(image.source_path),
@@ -256,14 +282,17 @@ def _profile_case(
     if image.unsupported_reason is not None:
         result.status = "skipped"
         result.reason = f"unsupported input format: {image.unsupported_reason}"
+        complete_planned_progress()
         return result, []
     if mode not in {"lossless", "vardct"}:
         result.status = "skipped"
         result.reason = f"unsupported mode: {mode}"
+        complete_planned_progress()
         return result, []
     if not encoder_available:
         result.status = "skipped"
         result.reason = f"encoder command not found: {encoder_command}"
+        complete_planned_progress()
         return result, []
 
     case_id = _case_id(image.image_id, encoder_name, mode, effort, distance)
@@ -291,11 +320,13 @@ def _profile_case(
             ),
         )
         case_samples.append(sample)
+        mark_progress()
         if sample.status != "completed":
             result.status = "failed"
             result.reason = "warmup encode failed"
             result.stderr = sample.stderr
             result.command = sample.command
+            complete_planned_progress()
             return result, case_samples
 
     for sample_index in range(samples):
@@ -318,12 +349,14 @@ def _profile_case(
             ),
         )
         case_samples.append(sample)
+        mark_progress()
         result.command = sample.command
         result.encoded_path = sample.encoded_path
         if sample.status != "completed":
             result.status = "failed"
             result.reason = "encode failed"
             result.stderr = sample.stderr
+            complete_planned_progress()
             return result, case_samples
         if sample.encode_seconds is not None:
             measured_seconds.append(sample.encode_seconds)
@@ -353,6 +386,30 @@ def _profile_case(
     if measured_stage_timings:
         result.extra = {"stage_timing_samples": measured_stage_timings}
     return result, case_samples
+
+
+def _advance_progress(
+    progress_update: Callable[[int], object] | None, count: int
+) -> None:
+    if progress_update is not None and count > 0:
+        progress_update(count)
+
+
+def _profile_progress_total(
+    images: list[ImageRecord], config: ProfileConfig, requested_encoders: list[str]
+) -> int:
+    invocations_per_case = config.warmups + config.samples
+    total = 0
+    for _image in images:
+        for mode in config.modes:
+            distances = [None] if mode == "lossless" else config.distances
+            total += (
+                len(distances)
+                * len(config.efforts)
+                * len(requested_encoders)
+                * invocations_per_case
+            )
+    return total
 
 
 def _run_profile_sample(

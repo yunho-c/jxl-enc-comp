@@ -18,6 +18,74 @@ from jxl_parity.profiler import (
 
 
 class ProfilerTests(unittest.TestCase):
+    def test_profile_progress_counts_encode_invocations(self) -> None:
+        class FakeProgress:
+            def __init__(self, **kwargs) -> None:
+                self.kwargs = kwargs
+                self.updates: list[int] = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback) -> None:
+                return None
+
+            def update(self, count: int) -> None:
+                self.updates.append(count)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            out_dir = root / "profile"
+            corpus.mkdir()
+            Image.new("RGB", (2, 2), (1, 2, 3)).save(corpus / "sample.png")
+            progress_instances: list[FakeProgress] = []
+
+            def fake_tqdm(**kwargs):
+                progress = FakeProgress(**kwargs)
+                progress_instances.append(progress)
+                return progress
+
+            def fake_tool_path(command: str) -> str | None:
+                return f"/bin/{command}"
+
+            def fake_encode(**kwargs):
+                kwargs["output_path"].write_bytes(b"jxl")
+                return CommandResult(
+                    ["cjxl-rs", "input.png"], 0, 0.1, "", ""
+                )
+
+            with (
+                patch("jxl_parity.profiler.tqdm", side_effect=fake_tqdm),
+                patch("jxl_parity.profiler.tool_path", side_effect=fake_tool_path),
+                patch("jxl_parity.profiler.tool_supports_option", return_value=False),
+                patch("jxl_parity.profiler.encode", side_effect=fake_encode),
+            ):
+                run_profile(
+                    ProfileConfig(
+                        corpus=[corpus],
+                        out_dir=out_dir,
+                        cjxl="cjxl",
+                        jxl_encoder="cjxl-rs",
+                        encoder="jxl-encoder",
+                        modes=["lossless"],
+                        distances=[1.0],
+                        efforts=[7],
+                        max_images=None,
+                        keep_work=False,
+                        instrument_stages=False,
+                        samples=2,
+                        warmups=1,
+                    )
+                )
+
+            self.assertEqual(len(progress_instances), 1)
+            progress = progress_instances[0]
+            self.assertEqual(progress.kwargs["total"], 3)
+            self.assertEqual(progress.kwargs["desc"], "Profiling")
+            self.assertEqual(progress.kwargs["unit"], "encode")
+            self.assertEqual(sum(progress.updates), 3)
+
     def test_profiler_fallback_command_uses_selected_vardct_distance(self) -> None:
         command = _example_command(
             ProfileConfig(
