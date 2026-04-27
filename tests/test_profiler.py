@@ -53,7 +53,12 @@ class ProfilerTests(unittest.TestCase):
                 )
 
             self.assertEqual(summary.completed_cases, 1)
+            self.assertEqual(summary.samples_per_case, 2)
+            self.assertEqual(summary.warmups_per_case, 1)
             self.assertFalse((out_dir / "work").exists())
+            profile_summary = json.loads((out_dir / "profile_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(profile_summary["samples_per_case"], 2)
+            self.assertEqual(profile_summary["warmups_per_case"], 1)
             stage_timing = json.loads((out_dir / "stage_timing.json").read_text(encoding="utf-8"))
             self.assertEqual(stage_timing["stage_source"], "wall_clock_encode_total")
             self.assertEqual(stage_timing["runs"][0]["stages"][0]["stage"], "encode_total")

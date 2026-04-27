@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--warmups",
         type=int,
         default=0,
-        help="Unmeasured warmup encodes before each profiled case.",
+        help="Warmup encodes before each profiled case; excluded from aggregate timing.",
     )
     profile.add_argument(
         "--instrument-stages",

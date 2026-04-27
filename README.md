@@ -157,10 +157,10 @@ The profile command writes:
 
 `profile_runs.csv` has one aggregate row per image/settings/encoder case.
 `profile_samples.csv` has one row per warmup and measured encode invocation, so
-you can inspect variance before comparing encoders. `stage_timing.json` records
-top-level encode wall time as `encode_total`; when multiple samples are used,
-`encode_seconds` is the measured-sample average and min/median/max/stdev are
-included alongside it.
+you can inspect variance before comparing encoders. Warmups are recorded there
+but excluded from aggregate timing. `stage_timing.json` records top-level encode
+wall time as `encode_total`; when multiple samples are used, `encode_seconds` is
+the measured-sample average and min/median/max/stdev are included alongside it.
 
 The stock encoder CLIs do not expose internal JPEG XL stage timings, so use
 `profiler_commands.md` to capture stack samples or flamegraphs for

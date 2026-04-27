@@ -38,6 +38,8 @@ class ProfileSummary:
     skipped_cases: int
     encoder: str
     instrument_stages: bool
+    samples_per_case: int
+    warmups_per_case: int
     tool_status: dict[str, bool]
 
 
@@ -147,6 +149,8 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
         skipped_cases=skipped,
         encoder=config.encoder,
         instrument_stages=config.instrument_stages,
+        samples_per_case=config.samples,
+        warmups_per_case=config.warmups,
         tool_status=tool_status,
     )
 
@@ -491,8 +495,8 @@ def _write_profile_report(
         f"- Failed: {summary.failed_cases}",
         f"- Skipped: {summary.skipped_cases}",
         f"- Encoder selection: {summary.encoder}",
-        f"- Measured samples per case: {config.samples}",
-        f"- Warmups per case: {config.warmups}",
+        f"- Measured samples per case: {summary.samples_per_case}",
+        f"- Warmups per case: {summary.warmups_per_case}",
         "",
         "## Artifacts",
         "",
