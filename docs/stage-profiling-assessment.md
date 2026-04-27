@@ -57,16 +57,23 @@ stages.
 ## What The Instrumented Rust Encoder Exposes
 
 The instrumented `jxl-encoder` fork exposes timing data through `cjxl-rs
---stage-timing-json <file>` and currently reports these coarse stable stages:
+--stage-timing-json <file>` and currently reports flat leaf stages where the
+implementation has clear boundaries:
 
-- `color_xyb`
-- `block_stats`
-- `filter_simulation`
-- `ac_strategy_search`
-- `quant_scoring`
-- `transform_quantize`
-- `entropy_prepass`
-- `bitstream_write`
+- `input_conversion`
+- `color_transform`
+- `block_strategy`
+- `transform_selection`
+- `adaptive_quantization`
+- `chroma_from_luma`
+- `dct_coefficient_generation`
+- `coefficient_tokenization`
+- `histogram_construction`
+- `ans_huffman_encoding`
+- `bit_writing`
+- optional path-dependent stages such as `noise_synthesis`,
+  `gaborish_filtering`, `butteraugli_rate_control`, `lz77_search`,
+  `lf_image_generation`, and `container_metadata`
 
 Stock `cjxl-rs` builds still expose output size, mode, strategy counts,
 gaborish, ANS, loop count, and pixel-domain-loss flags, but no timings. The
@@ -84,10 +91,10 @@ the instrumented work. If parent stages are needed later, add an explicit schema
 field such as `stage_group` or `parent_stage` and teach the harness how to
 aggregate it. Until then, keep parent groups as metadata only.
 
-This means the existing coarse names can remain accepted for old instrumented
-builds, while future builds can emit more granular leaf names. The harness
-already ingests arbitrary stage strings, so this is mostly a Rust
-instrumentation and documentation problem.
+The existing coarse names remain accepted for old instrumented builds, while
+current builds emit the granular leaf names above. The harness already ingests
+arbitrary stage strings, so this is mostly a Rust instrumentation and
+documentation problem.
 
 ## VarDCT Stage Map
 
