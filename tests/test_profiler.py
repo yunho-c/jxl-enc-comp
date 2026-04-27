@@ -9,7 +9,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from jxl_parity.codecs import CommandResult
-from jxl_parity.profiler import ProfileConfig, _example_command, run_profile
+from jxl_parity.profiler import ProfileConfig, _example_command, _example_commands, run_profile
 
 
 class ProfilerTests(unittest.TestCase):
@@ -33,6 +33,29 @@ class ProfilerTests(unittest.TestCase):
         self.assertIn("-e 9", command)
         self.assertIn("-d 2.5", command)
         self.assertNotIn("--lossless", command)
+
+    def test_profiler_fallback_commands_cover_both_encoders(self) -> None:
+        commands = _example_commands(
+            ProfileConfig(
+                corpus=[Path("corpus")],
+                out_dir=Path("reports/profile"),
+                cjxl="cjxl",
+                jxl_encoder="cjxl-rs",
+                encoder="both",
+                modes=["lossless"],
+                distances=[1.0],
+                efforts=[3],
+                max_images=None,
+                keep_work=False,
+                instrument_stages=True,
+            )
+        )
+
+        labels = [label for label, _command in commands]
+        command_text = "\n".join(command for _label, command in commands)
+        self.assertEqual(labels, ["libjxl fallback command", "jxl-encoder fallback command"])
+        self.assertIn("cjxl '<reference.png>'", command_text)
+        self.assertIn("cjxl-rs '<reference.png>'", command_text)
 
     def test_profile_writes_stage_timing_and_profiler_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -86,6 +109,8 @@ class ProfilerTests(unittest.TestCase):
             self.assertEqual(stage_timing["runs"][0]["stages"][0]["sample_count"], 2)
             self.assertEqual(stage_timing["runs"][0]["stages"][0]["warmup_count"], 1)
             self.assertEqual(stage_timing["runs"][0]["stages"][0]["seconds"], 0.3)
+            profile_runs_json = json.loads((out_dir / "profile_runs.json").read_text(encoding="utf-8"))
+            self.assertEqual(profile_runs_json[0]["sample_count"], 2)
             profile_runs = (out_dir / "profile_runs.csv").read_text(encoding="utf-8")
             self.assertIn("encode_seconds_median", profile_runs)
             self.assertIn("0.3", profile_runs)

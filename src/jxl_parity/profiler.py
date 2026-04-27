@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import shlex
 import statistics
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
@@ -160,6 +161,7 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
     sample_rows = [asdict(sample) for sample in samples]
     write_json(out_dir / "profile_summary.json", asdict(summary))
     write_json(out_dir / "profile_results.json", [asdict(result) for result in results])
+    write_json(out_dir / "profile_runs.json", rows)
     write_csv(out_dir / "profile_runs.csv", rows)
     write_json(out_dir / "profile_samples.json", sample_rows)
     write_csv(out_dir / "profile_samples.csv", sample_rows, _csv_fields(ProfileSample))
@@ -426,8 +428,7 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
 
 
 def _write_profiler_commands(path: Path, config: ProfileConfig, results: list[ProfileResult]) -> None:
-    completed = [result for result in results if result.status == "completed" and result.command]
-    example = completed[0].command if completed and config.keep_work else _example_command(config)
+    examples = _profiler_command_examples(config, results)
     lines = [
         "# Profiler Commands",
         "",
@@ -437,23 +438,34 @@ def _write_profiler_commands(path: Path, config: ProfileConfig, results: list[Pr
         "For internal stage attribution, run one of these commands around a representative",
         "encoder invocation:",
         "",
-        "```bash",
-        f"perf record --call-graph dwarf -- {example}",
-        "perf report",
-        "```",
-        "",
-        "```bash",
-        f"samply record -- {example}",
-        "```",
-        "",
-        "```bash",
-        f"flamegraph -- {example}",
-        "```",
-        "",
-        "Compare these stacks with the parity report's size, quality, and pass/fail outputs before",
-        "treating a hot `jxl-encoder` stage as representative of libjxl.",
-        "",
     ]
+    for label, example in examples:
+        lines.extend(
+            [
+                f"## {label}",
+                "",
+                "```bash",
+                f"perf record --call-graph dwarf -- {example}",
+                "perf report",
+                "```",
+                "",
+                "```bash",
+                f"samply record -- {example}",
+                "```",
+                "",
+                "```bash",
+                f"flamegraph -- {example}",
+                "```",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "Compare these stacks with the parity report's size, quality, and pass/fail outputs before",
+            "treating a hot `jxl-encoder` stage as representative of libjxl.",
+            "",
+        ]
+    )
     if not config.keep_work:
         lines.extend(
             [
@@ -500,8 +512,8 @@ def _write_profile_report(
         "",
         "## Artifacts",
         "",
-        "- `profile_runs.csv`: one aggregate row per image/settings/encoder case.",
-        "- `profile_samples.csv`: one row per warmup and measured encode invocation.",
+        "- `profile_runs.csv` / `profile_runs.json`: one aggregate row per image/settings/encoder case.",
+        "- `profile_samples.csv` / `profile_samples.json`: one row per warmup and measured encode invocation.",
         "- `stage_timing.json`: encode-total timing shaped as stage data for downstream tools.",
         "- `profiler_commands.md`: perf/samply/flamegraph command templates for stack attribution.",
         "",
@@ -536,17 +548,46 @@ def _write_profile_report(
 
 
 def _example_command(config: ProfileConfig) -> str:
-    command = config.cjxl if config.encoder == "libjxl" else config.jxl_encoder
-    output = str(config.out_dir / "work" / "encoded" / "profile-example.jxl")
+    return _example_commands(config)[0][1]
+
+
+def _profiler_command_examples(
+    config: ProfileConfig,
+    results: list[ProfileResult],
+) -> list[tuple[str, str]]:
+    if config.keep_work:
+        completed = [result for result in results if result.status == "completed" and result.command]
+        if completed:
+            examples: list[tuple[str, str]] = []
+            seen: set[str] = set()
+            for result in completed:
+                if result.encoder in seen or result.command is None:
+                    continue
+                seen.add(result.encoder)
+                examples.append((f"{result.encoder} exact command", result.command))
+            return examples
+    return _example_commands(config)
+
+
+def _example_commands(config: ProfileConfig) -> list[tuple[str, str]]:
+    return [
+        (f"{encoder_name} fallback command", _example_command_for_encoder(config, encoder_name))
+        for encoder_name in _requested_encoders(config.encoder)
+    ]
+
+
+def _example_command_for_encoder(config: ProfileConfig, encoder_name: str) -> str:
+    command = config.cjxl if encoder_name == "libjxl" else config.jxl_encoder
+    output = config.out_dir / "work" / "encoded" / f"profile-example-{encoder_name}.jxl"
     input_path = "<reference.png>"
     mode = config.modes[0]
     distance = config.distances[0] if config.distances else None
-    if config.encoder == "libjxl":
+    if encoder_name == "libjxl":
         distance_arg = "0.0" if mode == "lossless" else str(distance)
-        return f"{command} {input_path} {output} --quiet -e {config.efforts[0]} -d {distance_arg}"
+        return _shell_join([command, input_path, output, "--quiet", "-e", config.efforts[0], "-d", distance_arg])
     if mode == "lossless":
-        return f"{command} {input_path} {output} -e {config.efforts[0]} --lossless"
-    return f"{command} {input_path} {output} -e {config.efforts[0]} -d {distance}"
+        return _shell_join([command, input_path, output, "-e", config.efforts[0], "--lossless"])
+    return _shell_join([command, input_path, output, "-e", config.efforts[0], "-d", distance])
 
 
 def _requested_encoders(value: str) -> list[str]:
@@ -579,3 +620,7 @@ def _csv_fields(data_class: type[object]) -> list[str]:
 
 def _format_number(value: float | None) -> str:
     return "" if value is None else f"{value:.6g}"
+
+
+def _shell_join(parts: list[object]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in parts)
