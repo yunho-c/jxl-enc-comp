@@ -293,6 +293,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Wrote flamegraph artifacts to {summary.out_dir}")
         print(f"status={summary.status} image={summary.image_id}")
         print(f"command={summary.profiler_command}")
+        if summary.reason != "ok":
+            print(f"reason={summary.reason}")
         if summary.stage_timing_path:
             print(f"stage_timing={summary.stage_timing_path}")
         if summary.status == "failed" and summary.stderr:

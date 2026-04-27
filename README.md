@@ -225,8 +225,11 @@ jxl-parity flamegraph \
 
 The command writes `flamegraph.svg`, the exact encoder and profiler commands,
 `run_flamegraph.sh`, `flamegraph_summary.json`, and the normalized input/output
-under `work/`. Use `--dry-run` to prepare those artifacts without executing the
-profiler. From a checkout:
+under `work/`. On macOS, if the installed `flamegraph` tool records successfully
+but fails while collapsing `xctrace` XML, the entrypoint falls back to exporting
+the time-profile XML directly and writes `folded_stacks.txt` plus
+`xctrace_*_command.txt` diagnostics. Use `--dry-run` to prepare artifacts
+without executing the profiler. From a checkout:
 
 ```bash
 just flamegraph --dry-run --corpus ~/GitHub/test_images

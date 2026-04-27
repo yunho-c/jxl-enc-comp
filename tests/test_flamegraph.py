@@ -108,9 +108,16 @@ class FlamegraphTests(unittest.TestCase):
                 Path(summary.svg_path),
                 Path(summary.encoded_path),
                 Path(stage_timing_path),
+                out_dir / "folded_stacks.txt",
+                out_dir / "xctrace_record_command.txt",
+                out_dir / "xctrace_export_command.txt",
+                out_dir / "flamegraph-run" / "xctrace-time-profile.xml",
             ]
             for path in stale_paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("stale", encoding="utf-8")
+            stale_trace_dir = out_dir / "flamegraph-run" / "xctrace-fallback.trace"
+            stale_trace_dir.mkdir(parents=True)
 
             with (
                 patch("jxl_parity.flamegraph.tool_path", return_value="/bin/tool"),
@@ -138,6 +145,7 @@ class FlamegraphTests(unittest.TestCase):
             self.assertEqual(rerun_summary.status, "prepared")
             for path in stale_paths:
                 self.assertFalse(path.exists())
+            self.assertFalse(stale_trace_dir.exists())
 
     def test_runs_flamegraph_around_libjxl_lossless_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -234,6 +242,77 @@ class FlamegraphTests(unittest.TestCase):
 
             self.assertEqual(summary.status, "completed")
             self.assertEqual(working_dirs, [out_dir / "flamegraph-run"])
+
+    def test_macos_xctrace_fallback_handles_nested_frame_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            out_dir = root / "flamegraph"
+            corpus.mkdir()
+            Image.new("RGB", (2, 2), (1, 2, 3)).save(corpus / "sample.png")
+            commands: list[list[str]] = []
+            xctrace_xml = """<?xml version="1.0"?>
+<trace-query-result><node>
+<row><backtrace id="1"><frame id="2" name="leaf"><binary id="3" name="cjxl-rs"/></frame><frame id="4" name="root"/></backtrace></row>
+<row><backtrace ref="1"/></row>
+<row><sentinel/></row>
+</node></trace-query-result>"""
+
+            def fake_run(args: list[str], cwd: Path | None = None) -> CommandResult:
+                commands.append(args)
+                if args[0] == "flamegraph":
+                    return CommandResult(
+                        args,
+                        1,
+                        0.1,
+                        "",
+                        "Error: unable to collapse generated profile data\n"
+                        "Read xml event failed: IllFormed("
+                        'MismatchedEndTag { expected: "binary", found: "frame" })',
+                    )
+                if args[1] == "record":
+                    return CommandResult(args, 0, 0.2, "", "")
+                if args[1] == "export":
+                    return CommandResult(args, 0, 0.3, xctrace_xml, "")
+                raise AssertionError(f"unexpected command: {args}")
+
+            with (
+                patch(
+                    "jxl_parity.flamegraph.tool_path",
+                    side_effect=lambda command: f"/usr/bin/{command}",
+                ),
+                patch("jxl_parity.flamegraph.run_command", side_effect=fake_run),
+                patch("jxl_parity.flamegraph.sys.platform", "darwin"),
+            ):
+                summary = run_flamegraph(
+                    FlamegraphConfig(
+                        corpus=[corpus],
+                        out_dir=out_dir,
+                        cjxl="cjxl",
+                        jxl_encoder="cjxl-rs",
+                        encoder="jxl-encoder",
+                        mode="vardct",
+                        distance=1.0,
+                        effort=7,
+                        max_images=1,
+                        flamegraph="flamegraph",
+                        dry_run=False,
+                        instrument_stages=False,
+                    )
+                )
+
+            self.assertEqual(summary.status, "completed")
+            self.assertIn("xctrace fallback", summary.reason)
+            self.assertTrue((out_dir / "flamegraph.svg").exists())
+            self.assertTrue((out_dir / "folded_stacks.txt").exists())
+            self.assertIn(
+                "root;leaf 2",
+                (out_dir / "folded_stacks.txt").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                [command[0] for command in commands],
+                ["flamegraph", "/usr/bin/xctrace", "/usr/bin/xctrace"],
+            )
 
 
 if __name__ == "__main__":
