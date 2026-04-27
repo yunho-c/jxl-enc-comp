@@ -22,3 +22,7 @@ profile *args:
 # Run a small profiling smoke suite.
 profile-smoke:
     PYTHONPATH=src python3 -m jxl_parity.cli profile --encoder jxl-encoder --instrument-stages --samples 2 --warmups 1 --max-images 1 --modes vardct --distances 1.0 --efforts 7 --out reports/profile-smoke
+
+# Run or prepare a one-image flamegraph entrypoint. Pass jxl-parity flags after the recipe name.
+flamegraph *args:
+    PYTHONPATH=src python3 -m jxl_parity.cli flamegraph {{args}}

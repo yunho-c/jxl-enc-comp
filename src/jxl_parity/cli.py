@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from .flamegraph import FlamegraphConfig, run_flamegraph
 from .profiler import ProfileConfig, ProfileSummary, run_profile
 from .runner import RunConfig, run_suite
 
@@ -124,6 +125,75 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Keep intermediate reference PNGs and encoded files.",
     )
+
+    flamegraph = subparsers.add_parser(
+        "flamegraph",
+        help="Prepare one encoder invocation and run it through flamegraph.",
+    )
+    flamegraph.add_argument(
+        "--corpus",
+        action="append",
+        type=Path,
+        default=[],
+        help="Corpus directory or image file. May be supplied more than once.",
+    )
+    flamegraph.add_argument(
+        "--out",
+        type=Path,
+        default=Path("reports/flamegraph"),
+        help="Output directory.",
+    )
+    flamegraph.add_argument("--cjxl", default="cjxl", help="libjxl encoder command.")
+    flamegraph.add_argument(
+        "--jxl-encoder",
+        default="cjxl-rs",
+        help="jxl-encoder CLI command.",
+    )
+    flamegraph.add_argument(
+        "--encoder",
+        choices=("jxl-encoder", "libjxl"),
+        default="jxl-encoder",
+        help="Encoder to profile.",
+    )
+    flamegraph.add_argument(
+        "--mode",
+        choices=tuple(sorted(VALID_MODES)),
+        default="vardct",
+        help="Encode mode for the profiled invocation.",
+    )
+    flamegraph.add_argument(
+        "--distance",
+        type=float,
+        default=1.0,
+        help="Butteraugli distance for vardct mode.",
+    )
+    flamegraph.add_argument(
+        "--effort",
+        type=int,
+        default=7,
+        help="Encoder effort.",
+    )
+    flamegraph.add_argument(
+        "--max-images",
+        type=int,
+        default=1,
+        help="Number of discovered images to inspect while choosing one supported input.",
+    )
+    flamegraph.add_argument(
+        "--flamegraph",
+        default="flamegraph",
+        help="flamegraph command.",
+    )
+    flamegraph.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write command artifacts without executing flamegraph.",
+    )
+    flamegraph.add_argument(
+        "--instrument-stages",
+        action="store_true",
+        help="Pass --stage-timing-json to compatible cjxl-rs builds.",
+    )
     return parser
 
 
@@ -196,6 +266,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.instrument_stages:
             print(_stage_timing_status(summary))
         return 1 if summary.failed_cases else 0
+
+    if args.command == "flamegraph":
+        _validate_single_profile(
+            parser, args.mode, args.distance, args.effort, args.max_images
+        )
+        config = FlamegraphConfig(
+            corpus=args.corpus,
+            out_dir=args.out,
+            cjxl=args.cjxl,
+            jxl_encoder=args.jxl_encoder,
+            encoder=args.encoder,
+            mode=args.mode,
+            distance=None if args.mode == "lossless" else args.distance,
+            effort=args.effort,
+            max_images=args.max_images,
+            flamegraph=args.flamegraph,
+            dry_run=args.dry_run,
+            instrument_stages=args.instrument_stages,
+        )
+        try:
+            summary = run_flamegraph(config)
+        except FileNotFoundError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        print(f"Wrote flamegraph artifacts to {summary.out_dir}")
+        print(f"status={summary.status} image={summary.image_id}")
+        print(f"command={summary.profiler_command}")
+        if summary.stage_timing_path:
+            print(f"stage_timing={summary.stage_timing_path}")
+        return 0 if summary.status in {"completed", "prepared"} else 1
 
     parser.error(f"unknown command: {args.command}")
     return 2
@@ -301,6 +401,24 @@ def _validate_profile_counts(parser: argparse.ArgumentParser, samples: int, warm
         parser.error("--samples must be at least 1")
     if warmups < 0:
         parser.error("--warmups must be at least 0")
+
+
+def _validate_single_profile(
+    parser: argparse.ArgumentParser,
+    mode: str,
+    distance: float,
+    effort: int,
+    max_images: int | None,
+) -> None:
+    if mode == "vardct":
+        if not math.isfinite(distance):
+            parser.error("--distance must be a finite number")
+        if distance < 0.0:
+            parser.error("--distance must be at least 0")
+    if effort < 1:
+        parser.error("--effort must be at least 1")
+    if max_images is not None and max_images < 1:
+        parser.error("--max-images must be at least 1")
 
 
 if __name__ == "__main__":

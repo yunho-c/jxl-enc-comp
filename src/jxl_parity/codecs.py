@@ -58,6 +58,31 @@ def encode(
     distance: float | None,
     stage_timing_path: Path | None = None,
 ) -> CommandResult:
+    return run_command(
+        build_encode_args(
+            encoder=encoder,
+            command=command,
+            input_path=input_path,
+            output_path=output_path,
+            mode=mode,
+            effort=effort,
+            distance=distance,
+            stage_timing_path=stage_timing_path,
+        )
+    )
+
+
+def build_encode_args(
+    *,
+    encoder: str,
+    command: str,
+    input_path: Path,
+    output_path: Path,
+    mode: str,
+    effort: int,
+    distance: float | None,
+    stage_timing_path: Path | None = None,
+) -> list[str]:
     if encoder == "libjxl":
         args = [
             command,
@@ -81,7 +106,7 @@ def encode(
             args.extend(["--stage-timing-json", str(stage_timing_path)])
     else:
         raise ValueError(f"unknown encoder: {encoder}")
-    return run_command(args)
+    return args
 
 
 def decode(djxl: str, input_path: Path, output_path: Path) -> CommandResult:

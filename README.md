@@ -208,6 +208,37 @@ representative cases. Pass `--keep-work` when you want the exact normalized
 input files and recorded commands to remain usable after the profile run. See
 `docs/stage-profiling-assessment.md` for the detailed feasibility answer.
 
+## Flamegraph Entrypoint
+
+Use `jxl-parity flamegraph` when you want one normalized encoder invocation
+wrapped directly by `flamegraph`:
+
+```bash
+jxl-parity flamegraph \
+  --corpus ~/GitHub/test_images \
+  --encoder jxl-encoder \
+  --mode vardct \
+  --distance 1.0 \
+  --effort 7 \
+  --out reports/flamegraph
+```
+
+The command writes `flamegraph.svg`, the exact encoder and profiler commands,
+`run_flamegraph.sh`, `flamegraph_summary.json`, and the normalized input/output
+under `work/`. Use `--dry-run` to prepare those artifacts without executing the
+profiler. From a checkout:
+
+```bash
+just flamegraph --dry-run --corpus ~/GitHub/test_images
+```
+
+For clearer Rust stacks, rebuild the target encoder with debug symbols and frame
+pointers before running the entrypoint, for example:
+
+```bash
+RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release
+```
+
 ## Tests
 
 ```bash

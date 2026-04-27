@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from jxl_parity.cli import main
+from jxl_parity.flamegraph import FlamegraphSummary
 from jxl_parity.profiler import ProfileSummary
 
 
@@ -193,6 +194,41 @@ class CliTests(unittest.TestCase):
             "stage_timing=encode_total only (no named sidecar stages ingested)",
             stdout.getvalue(),
         )
+
+    def test_flamegraph_dry_run_reports_command(self) -> None:
+        stdout = io.StringIO()
+        summary = FlamegraphSummary(
+            out_dir=Path("reports/flamegraph"),
+            image_id="sample",
+            source_path="sample.png",
+            reference_path="reports/flamegraph/work/reference/sample.png",
+            encoded_path="reports/flamegraph/work/encoded/sample.jxl",
+            svg_path="reports/flamegraph/flamegraph.svg",
+            stage_timing_path=None,
+            encoder="jxl-encoder",
+            mode="vardct",
+            distance=1.0,
+            effort=7,
+            status="prepared",
+            reason="dry run; profiler command was not executed",
+            returncode=None,
+            elapsed_seconds=None,
+            encoder_command="cjxl-rs input.png output.jxl -e 7 -d 1.0",
+            profiler_command="flamegraph -o flamegraph.svg -- cjxl-rs input.png output.jxl",
+            tool_status={"encoder": False, "flamegraph": False},
+            stderr=None,
+        )
+
+        with (
+            patch("jxl_parity.cli.run_flamegraph", return_value=summary),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = main(["flamegraph", "--dry-run"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Wrote flamegraph artifacts", stdout.getvalue())
+        self.assertIn("status=prepared image=sample", stdout.getvalue())
+        self.assertIn("command=flamegraph -o", stdout.getvalue())
 
 
 if __name__ == "__main__":
