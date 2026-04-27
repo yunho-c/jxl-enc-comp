@@ -69,6 +69,7 @@ implementation has clear boundaries:
 - `dct_coefficient_generation`
 - `coefficient_tokenization`
 - `histogram_construction`
+- `histogram_clustering`
 - `ans_huffman_encoding`
 - `bit_writing`
 - optional path-dependent stages such as `noise_synthesis`,
