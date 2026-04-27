@@ -146,9 +146,21 @@ class ProfilerTests(unittest.TestCase):
             self.assertTrue((out_dir / "profile_samples.csv").exists())
             profile_report = (out_dir / "profile_report.md").read_text(encoding="utf-8")
             self.assertIn("profile_samples.csv", profile_report)
+            self.assertIn("profile_stage_summary.csv", profile_report)
             self.assertIn("Measured samples per case: 2", profile_report)
             self.assertIn("Stage Timing Feasibility", profile_report)
+            self.assertIn("Per-Stage Summary", profile_report)
+            self.assertIn("encode_total", profile_report)
+            self.assertIn("profile_plots/stage-seconds-per-mp.svg", profile_report)
             self.assertIn("cannot attribute time to color transform", profile_report)
+            stage_summary = (out_dir / "profile_stage_summary.csv").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("percent_of_encode_total", stage_summary)
+            self.assertIn("encode_total", stage_summary)
+            self.assertTrue(
+                (out_dir / "profile_plots" / "stage-seconds-per-mp.svg").exists()
+            )
             profiler_commands = (out_dir / "profiler_commands.md").read_text(
                 encoding="utf-8"
             )
@@ -266,6 +278,15 @@ class ProfilerTests(unittest.TestCase):
             )
             aggregates = {entry["stage"]: entry for entry in stage_timing["aggregates"]}
             self.assertEqual(aggregates["color_xyb"]["avg_seconds"], 0.02)
+            profile_report = (out_dir / "profile_report.md").read_text(encoding="utf-8")
+            self.assertIn("Named Stage Shares", profile_report)
+            self.assertIn("color_xyb", profile_report)
+            self.assertIn("profile_plots/stage-share.svg", profile_report)
+            stage_summary = (out_dir / "profile_stage_summary.csv").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("color_xyb", stage_summary)
+            self.assertTrue((out_dir / "profile_plots" / "stage-share.svg").exists())
 
     def test_profile_reports_unsupported_inputs_as_skips(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

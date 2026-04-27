@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import shutil
 import shlex
@@ -11,6 +12,22 @@ from typing import Any
 from .codecs import encode, tool_path, tool_supports_option
 from .corpus import ImageRecord, discover_images
 from .reports import write_csv, write_json
+
+PROFILE_STAGE_SUMMARY_FIELDS = [
+    "encoder",
+    "mode",
+    "distance",
+    "effort",
+    "stage",
+    "cases",
+    "avg_seconds",
+    "min_seconds",
+    "median_seconds",
+    "max_seconds",
+    "stdev_seconds",
+    "avg_seconds_per_mp",
+    "percent_of_encode_total",
+]
 
 
 @dataclass(frozen=True)
@@ -188,6 +205,11 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
     write_csv(out_dir / "profile_runs.csv", rows)
     write_json(out_dir / "profile_samples.json", sample_rows)
     write_csv(out_dir / "profile_samples.csv", sample_rows, _csv_fields(ProfileSample))
+    write_csv(
+        out_dir / "profile_stage_summary.csv",
+        _stage_summary_rows(results),
+        PROFILE_STAGE_SUMMARY_FIELDS,
+    )
     write_json(out_dir / "stage_timing.json", _stage_timing_payload(summary, results))
     _write_profile_report(out_dir / "profile_report.md", summary, results, config)
     _write_profiler_commands(out_dir / "profiler_commands.md", config, results)
@@ -696,6 +718,38 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
     return aggregates
 
 
+def _stage_summary_rows(results: list[ProfileResult]) -> list[dict[str, object]]:
+    aggregates = _aggregate_stage_totals(results)
+    encode_totals = {
+        _stage_group_key(row): row.get("avg_seconds")
+        for row in aggregates
+        if row.get("stage") == "encode_total"
+    }
+    rows = []
+    for row in aggregates:
+        avg_seconds = row.get("avg_seconds")
+        encode_total = encode_totals.get(_stage_group_key(row))
+        rows.append(
+            {
+                **row,
+                "percent_of_encode_total": _percent(avg_seconds, encode_total),
+            }
+        )
+    return rows
+
+
+def _stage_group_key(row: dict[str, object]) -> tuple[object, object, object, object]:
+    return (row["encoder"], row["mode"], row["distance"], row["effort"])
+
+
+def _percent(value: object, total: object) -> float | None:
+    value_float = _to_float(value)
+    total_float = _to_float(total)
+    if value_float is None or total_float in {None, 0.0}:
+        return None
+    return (value_float / (total_float or 1.0)) * 100.0
+
+
 def _write_profiler_commands(
     path: Path, config: ProfileConfig, results: list[ProfileResult]
 ) -> None:
@@ -750,6 +804,238 @@ def _write_profiler_commands(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
+    if not stage_rows:
+        return ["No completed profile cases produced stage rows."]
+
+    rows = sorted(
+        stage_rows,
+        key=lambda row: _to_float(row.get("avg_seconds_per_mp"))
+        or _to_float(row.get("avg_seconds"))
+        or -1.0,
+        reverse=True,
+    )[:20]
+    lines = [
+        "Top aggregate stage timings by average seconds per megapixel.",
+        "",
+        "| Encoder | Mode | Distance | Effort | Stage | Cases | Avg seconds | Seconds/MP | % of encode_total |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    lines.extend(_stage_row_markdown(row) for row in rows)
+
+    named_rows = [
+        row
+        for row in stage_rows
+        if row.get("stage") != "encode_total"
+        and _to_float(row.get("percent_of_encode_total")) is not None
+    ]
+    lines.extend(["", "### Named Stage Shares", ""])
+    if named_rows:
+        lines.extend(
+            [
+                "| Encoder | Mode | Distance | Effort | Stage | Avg seconds | % of encode_total |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in sorted(
+            named_rows,
+            key=lambda item: _to_float(item.get("percent_of_encode_total")) or -1.0,
+            reverse=True,
+        )[:20]:
+            lines.append(
+                "| {encoder} | {mode} | {distance} | {effort} | {stage} | {seconds} | {percent} |".format(
+                    encoder=row["encoder"],
+                    mode=row["mode"],
+                    distance=_format_distance(row.get("distance")),
+                    effort=row["effort"],
+                    stage=row["stage"],
+                    seconds=_format_number(_to_float(row.get("avg_seconds"))),
+                    percent=_format_percent(row.get("percent_of_encode_total")),
+                )
+            )
+    else:
+        lines.append(
+            "No named sidecar stages were ingested; only `encode_total` is available for this run."
+        )
+    return lines
+
+
+def _stage_row_markdown(row: dict[str, object]) -> str:
+    return "| {encoder} | {mode} | {distance} | {effort} | {stage} | {cases} | {seconds} | {seconds_per_mp} | {percent} |".format(
+        encoder=row["encoder"],
+        mode=row["mode"],
+        distance=_format_distance(row.get("distance")),
+        effort=row["effort"],
+        stage=row["stage"],
+        cases=row["cases"],
+        seconds=_format_number(_to_float(row.get("avg_seconds"))),
+        seconds_per_mp=_format_number(_to_float(row.get("avg_seconds_per_mp"))),
+        percent=_format_percent(row.get("percent_of_encode_total")),
+    )
+
+
+def _stage_plot_markdown(stage_plots: list[tuple[str, str]]) -> list[str]:
+    if not stage_plots:
+        return ["No completed stage rows were available for plots."]
+    lines = []
+    for title, relative_path in stage_plots:
+        lines.extend([f"![{title}]({relative_path})", ""])
+    return lines[:-1]
+
+
+def _write_stage_plots(
+    out_dir: Path, stage_rows: list[dict[str, object]]
+) -> list[tuple[str, str]]:
+    if not stage_rows:
+        return []
+
+    plot_dir = out_dir / "profile_plots"
+    plot_dir.mkdir(exist_ok=True)
+    plots: list[tuple[str, str]] = []
+    seconds_svg = _stage_seconds_per_mp_svg(stage_rows)
+    if seconds_svg:
+        path = plot_dir / "stage-seconds-per-mp.svg"
+        path.write_text(seconds_svg, encoding="utf-8")
+        plots.append(("Average stage time per megapixel", path.relative_to(out_dir).as_posix()))
+
+    share_svg = _stage_share_svg(stage_rows)
+    if share_svg:
+        path = plot_dir / "stage-share.svg"
+        path.write_text(share_svg, encoding="utf-8")
+        plots.append(("Named stage share of encode total", path.relative_to(out_dir).as_posix()))
+    return plots
+
+
+def _stage_seconds_per_mp_svg(stage_rows: list[dict[str, object]]) -> str:
+    values = []
+    for row in stage_rows:
+        value = _to_float(row.get("avg_seconds_per_mp")) or _to_float(row.get("avg_seconds"))
+        if value is None:
+            continue
+        values.append((value, row))
+    if not values:
+        return ""
+
+    values = sorted(values, key=lambda item: item[0], reverse=True)[:20]
+    width = 900
+    left = 330
+    row_height = 24
+    height = 48 + row_height * len(values) + 30
+    max_value = max(value for value, _row in values)
+    pieces = [
+        '<text x="16" y="25" font-size="16" font-weight="600">Average stage seconds per megapixel</text>',
+        f'<line x1="{left}" y1="38" x2="{left}" y2="{height - 24}" stroke="#71717a" />',
+    ]
+    for index, (value, row) in enumerate(values):
+        y = 46 + index * row_height
+        bar_width = 1 if max_value == 0 else (value / max_value) * (width - left - 90)
+        label = html.escape(_stage_plot_label(row))
+        fill = "#0f766e" if row.get("stage") == "encode_total" else "#7c3aed"
+        pieces.append(f'<text x="16" y="{y + 13}" font-size="12">{label}</text>')
+        pieces.append(
+            f'<rect x="{left}" y="{y}" width="{bar_width:.1f}" height="14" fill="{fill}" />'
+        )
+        pieces.append(
+            f'<text x="{left + bar_width + 6:.1f}" y="{y + 12}" font-size="12">{value:.4g}s/MP</text>'
+        )
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img">{"".join(pieces)}</svg>'
+
+
+def _stage_share_svg(stage_rows: list[dict[str, object]]) -> str:
+    named_rows = [
+        row
+        for row in stage_rows
+        if row.get("stage") != "encode_total"
+        and _to_float(row.get("percent_of_encode_total")) is not None
+    ]
+    if not named_rows:
+        return ""
+
+    grouped: dict[tuple[object, object, object, object], list[dict[str, object]]] = {}
+    for row in named_rows:
+        grouped.setdefault(_stage_group_key(row), []).append(row)
+    groups = sorted(
+        grouped.items(),
+        key=lambda item: sum(
+            _to_float(row.get("percent_of_encode_total")) or 0.0
+            for row in item[1]
+        ),
+        reverse=True,
+    )[:12]
+
+    width = 900
+    left = 230
+    plot_width = 560
+    row_height = 26
+    height = 54 + row_height * len(groups) + 44
+    palette = [
+        "#2563eb",
+        "#dc2626",
+        "#16a34a",
+        "#ca8a04",
+        "#7c3aed",
+        "#0891b2",
+        "#db2777",
+        "#4b5563",
+    ]
+    stage_names = sorted({str(row["stage"]) for _key, rows in groups for row in rows})
+    stage_colors = {
+        stage: palette[index % len(palette)] for index, stage in enumerate(stage_names)
+    }
+    pieces = [
+        '<text x="16" y="25" font-size="16" font-weight="600">Named stage share of encode_total</text>',
+        f'<line x1="{left}" y1="38" x2="{left + plot_width}" y2="38" stroke="#71717a" />',
+        f'<text x="{left}" y="{height - 18}" font-size="12">0%</text>',
+        f'<text x="{left + plot_width - 34}" y="{height - 18}" font-size="12">100%</text>',
+    ]
+    for index, (key, rows) in enumerate(groups):
+        y = 48 + index * row_height
+        pieces.append(
+            f'<text x="16" y="{y + 13}" font-size="12">{html.escape(_stage_group_label(key))}</text>'
+        )
+        x = float(left)
+        for row in sorted(rows, key=lambda item: str(item["stage"])):
+            percent = min(_to_float(row.get("percent_of_encode_total")) or 0.0, 100.0)
+            segment_width = (percent / 100.0) * plot_width
+            if segment_width <= 0:
+                continue
+            stage = str(row["stage"])
+            color = stage_colors[stage]
+            pieces.append(
+                f'<rect x="{x:.1f}" y="{y}" width="{segment_width:.1f}" height="15" fill="{color}">'
+                f"<title>{html.escape(stage)} {percent:.1f}%</title></rect>"
+            )
+            if segment_width >= 54:
+                pieces.append(
+                    f'<text x="{x + 4:.1f}" y="{y + 12}" font-size="11" fill="#fff">{html.escape(stage[:14])}</text>'
+                )
+            x += segment_width
+
+    legend_x = left
+    legend_y = height - 38
+    for index, stage in enumerate(stage_names[:8]):
+        x = legend_x + index * 102
+        pieces.append(
+            f'<rect x="{x}" y="{legend_y}" width="10" height="10" fill="{stage_colors[stage]}" />'
+        )
+        pieces.append(
+            f'<text x="{x + 14}" y="{legend_y + 10}" font-size="11">{html.escape(stage[:12])}</text>'
+        )
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img">{"".join(pieces)}</svg>'
+
+
+def _stage_plot_label(row: dict[str, object]) -> str:
+    return (
+        f"{row['encoder']} {row['mode']} {_format_distance(row.get('distance'))} "
+        f"e{row['effort']} {row['stage']}"
+    )
+
+
+def _stage_group_label(key: tuple[object, object, object, object]) -> str:
+    encoder, mode, distance, effort = key
+    return f"{encoder} {mode} {_format_distance(distance)} e{effort}"
+
+
 def _write_profile_report(
     path: Path,
     summary: ProfileSummary,
@@ -758,6 +1044,8 @@ def _write_profile_report(
 ) -> None:
     completed = [result for result in results if result.status == "completed"]
     has_sidecar_stages = any(_stage_timing_samples(result) for result in results)
+    stage_rows = _stage_summary_rows(results)
+    stage_plots = _write_stage_plots(path.parent, stage_rows)
     slowest = sorted(
         completed,
         key=lambda result: (
@@ -819,12 +1107,22 @@ def _write_profile_report(
         "",
         "- `profile_runs.csv` / `profile_runs.json`: one aggregate row per image/settings/encoder case.",
         "- `profile_samples.csv` / `profile_samples.json`: one row per warmup and measured encode invocation.",
+        "- `profile_stage_summary.csv`: per-stage aggregate timing rows used by the tables and plots below.",
         f"- `stage_timing.json`: {stage_artifact}",
+        "- `profile_plots/`: SVG plots embedded in this markdown report.",
         "- `profiler_commands.md`: perf/samply/flamegraph command templates for stack attribution.",
         "",
         "## Stage Timing Feasibility",
         "",
         *feasibility_lines,
+        "",
+        "## Per-Stage Summary",
+        "",
+        *_stage_summary_markdown(stage_rows),
+        "",
+        "## Per-Stage Plots",
+        "",
+        *_stage_plot_markdown(stage_plots),
         "",
         "## Slowest Completed Cases",
         "",
@@ -973,6 +1271,25 @@ def _csv_fields(data_class: type[object]) -> list[str]:
 
 def _format_number(value: float | None) -> str:
     return "" if value is None else f"{value:.6g}"
+
+
+def _format_percent(value: object) -> str:
+    number = _to_float(value)
+    return "" if number is None else f"{number:.1f}%"
+
+
+def _format_distance(value: object) -> str:
+    return "lossless" if value is None or value == "" else str(value)
+
+
+def _to_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number and number not in {float("inf"), float("-inf")} else None
 
 
 def _shell_join(parts: list[object]) -> str:
