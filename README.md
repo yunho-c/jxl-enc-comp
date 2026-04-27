@@ -165,12 +165,18 @@ aggregate timing. `stage_timing.json` records top-level encode wall time as
 `encode_total`; when multiple samples are used, `encode_seconds` is the
 measured-sample average and min/median/max/stdev are included alongside it.
 
-The stock encoder CLIs do not expose internal JPEG XL stage timings, so use
-`profiler_commands.md` to capture stack samples or flamegraphs for
-representative cases. Pass `--keep-work` when you want the exact normalized
-input files and recorded commands to remain usable after the profile run.
-See `docs/stage-profiling-assessment.md` for the detailed feasibility answer and
-the `jxl-encoder` changes needed for true named-stage timings.
+When `--instrument-stages` is used with a compatible `cjxl-rs` build that
+supports `--stage-timing-json`, the harness writes per-sample sidecars and
+merges the named Rust encoder stages into `profile_samples.json` and
+`stage_timing.json`. `encode_total` remains the outer process wall-clock timing
+so stage overhead and unattributed setup or I/O time stay visible.
+
+Stock encoder CLIs do not expose internal JPEG XL stage timings, so the harness
+keeps the encode-total behavior for those binaries. Use `profiler_commands.md`
+to capture stack samples or flamegraphs for representative cases. Pass
+`--keep-work` when you want the exact normalized input files and recorded
+commands to remain usable after the profile run. See
+`docs/stage-profiling-assessment.md` for the detailed feasibility answer.
 
 ## Tests
 
