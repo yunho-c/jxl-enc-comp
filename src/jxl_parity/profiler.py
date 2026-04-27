@@ -157,6 +157,10 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
                         results.append(result)
                         samples.extend(case_samples)
 
+    tool_status["jxl_encoder_stage_timing_ingested"] = any(
+        _stage_timing_samples(result) for result in results
+    )
+
     completed = sum(result.status == "completed" for result in results)
     failed = sum(result.status == "failed" for result in results)
     skipped = sum(result.status == "skipped" for result in results)

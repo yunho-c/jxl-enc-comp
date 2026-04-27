@@ -206,12 +206,14 @@ def _csv(value: str) -> list[str]:
 
 
 def _stage_timing_status(summary: ProfileSummary) -> str:
-    if summary.tool_status.get("jxl_encoder_stage_timing"):
+    if summary.tool_status.get("jxl_encoder_stage_timing_ingested"):
         return "stage_timing=jxl-encoder sidecars enabled"
     if summary.encoder == "libjxl":
         return "stage_timing=encode_total only (libjxl has no sidecar support)"
     if not summary.tool_status.get("jxl_encoder"):
         return "stage_timing=unavailable (jxl-encoder command not found)"
+    if summary.tool_status.get("jxl_encoder_stage_timing"):
+        return "stage_timing=encode_total only (no named sidecar stages ingested)"
     return "stage_timing=encode_total only (cjxl-rs lacks --stage-timing-json)"
 
 

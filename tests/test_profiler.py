@@ -112,6 +112,7 @@ class ProfilerTests(unittest.TestCase):
             self.assertEqual(summary.completed_cases, 1)
             self.assertEqual(summary.samples_per_case, 2)
             self.assertEqual(summary.warmups_per_case, 1)
+            self.assertFalse(summary.tool_status["jxl_encoder_stage_timing_ingested"])
             self.assertFalse((out_dir / "work").exists())
             profile_summary = json.loads(
                 (out_dir / "profile_summary.json").read_text(encoding="utf-8")
@@ -212,7 +213,7 @@ class ProfilerTests(unittest.TestCase):
                 patch("jxl_parity.profiler.tool_supports_option", return_value=True),
                 patch("jxl_parity.profiler.encode", side_effect=fake_encode),
             ):
-                run_profile(
+                summary = run_profile(
                     ProfileConfig(
                         corpus=[corpus],
                         out_dir=out_dir,
@@ -230,6 +231,7 @@ class ProfilerTests(unittest.TestCase):
                     )
                 )
 
+            self.assertTrue(summary.tool_status["jxl_encoder_stage_timing_ingested"])
             samples = json.loads(
                 (out_dir / "profile_samples.json").read_text(encoding="utf-8")
             )

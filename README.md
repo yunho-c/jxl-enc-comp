@@ -182,6 +182,12 @@ case, including named-stage total time and unattributed time. `encode_total`
 remains the outer process wall-clock timing so stage overhead and unattributed
 setup or I/O time stay visible.
 
+Some encoder paths may accept the sidecar flag but emit no named stages. In that
+case the CLI reports `stage_timing=encode_total only (no named sidecar stages
+ingested)` and `stage_timing.json` keeps `stage_source:
+wall_clock_encode_total`. Use a VarDCT smoke when verifying the current
+instrumented fork's named-stage path.
+
 Stock encoder CLIs do not expose internal JPEG XL stage timings. If
 `cjxl-rs --help` does not list `--stage-timing-json`, the harness keeps the
 encode-total behavior for that binary even when `--instrument-stages` is passed.

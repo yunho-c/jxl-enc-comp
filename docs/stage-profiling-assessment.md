@@ -42,6 +42,12 @@ The `--instrument-stages` flag does not modify the encoder binary. If the
 selected `cjxl-rs` does not list `--stage-timing-json` in `--help`, the run
 falls back to encode-total timing and emits profiler guidance.
 
+Support for `--stage-timing-json` only means the CLI can write sidecars. Some
+encoder paths can still emit no named stages; those runs remain
+`wall_clock_encode_total` and the profile CLI reports that no named sidecar
+stages were ingested. Use a VarDCT run to verify the instrumented fork's named
+stages.
+
 ## What The Instrumented Rust Encoder Exposes
 
 The instrumented `jxl-encoder` fork exposes timing data through `cjxl-rs
