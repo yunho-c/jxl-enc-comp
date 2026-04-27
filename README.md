@@ -236,7 +236,7 @@ For clearer Rust stacks, rebuild the target encoder with debug symbols and frame
 pointers before running the entrypoint, for example:
 
 ```bash
-RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release
+RUSTFLAGS="-C force-frame-pointers=yes -C debuginfo=2" cargo build --release
 ```
 
 ## Tests

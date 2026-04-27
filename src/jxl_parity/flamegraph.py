@@ -231,7 +231,7 @@ def _write_command_artifacts(
         "For Rust binaries, prefer release builds with frame pointers, for example:",
         "",
         "```bash",
-        'RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release',
+        'RUSTFLAGS="-C force-frame-pointers=yes -C debuginfo=2" cargo build --release',
         "```",
         "",
     ]
