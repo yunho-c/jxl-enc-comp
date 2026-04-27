@@ -296,8 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if summary.stage_timing_path:
             print(f"stage_timing={summary.stage_timing_path}")
         if summary.status == "failed" and summary.stderr:
-            sys.stdout.flush()
-            print(f"error_detail={summary.stderr}", file=sys.stderr)
+            print(f"error_detail={summary.stderr}")
         return 0 if summary.status in {"completed", "prepared"} else 1
 
     parser.error(f"unknown command: {args.command}")

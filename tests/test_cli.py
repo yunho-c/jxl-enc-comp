@@ -232,7 +232,6 @@ class CliTests(unittest.TestCase):
 
     def test_flamegraph_failure_reports_stderr_detail(self) -> None:
         stdout = io.StringIO()
-        stderr = io.StringIO()
         summary = FlamegraphSummary(
             out_dir=Path("reports/flamegraph"),
             image_id="sample",
@@ -258,13 +257,12 @@ class CliTests(unittest.TestCase):
         with (
             patch("jxl_parity.cli.run_flamegraph", return_value=summary),
             contextlib.redirect_stdout(stdout),
-            contextlib.redirect_stderr(stderr),
         ):
             exit_code = main(["flamegraph"])
 
         self.assertEqual(exit_code, 1)
         self.assertIn("status=failed image=sample", stdout.getvalue())
-        self.assertIn("error_detail=Path not found 'cjxl-rs'", stderr.getvalue())
+        self.assertIn("error_detail=Path not found 'cjxl-rs'", stdout.getvalue())
 
 
 if __name__ == "__main__":
