@@ -218,14 +218,17 @@ class ProfilerTests(unittest.TestCase):
             self.assertIn("Measured samples per case: 2", profile_report)
             self.assertIn("Stage Timing Feasibility", profile_report)
             self.assertIn("Per-Stage Summary", profile_report)
+            self.assertIn("Stage Accounting", profile_report)
             self.assertIn("encode_total", profile_report)
             self.assertIn("profile_plots/stage-seconds-per-mp.svg", profile_report)
             self.assertIn("cannot attribute time to leaf stages", profile_report)
+            self.assertIn("No sidecar accounting was available", profile_report)
             self.assertIn("container wrapping", profile_report)
             stage_summary = (out_dir / "profile_stage_summary.csv").read_text(
                 encoding="utf-8"
             )
             self.assertIn("stage_group", stage_summary)
+            self.assertIn("avg_calls", stage_summary)
             self.assertIn("percent_of_encode_total", stage_summary)
             self.assertIn("encode_total", stage_summary)
             self.assertTrue(
@@ -361,14 +364,98 @@ class ProfilerTests(unittest.TestCase):
             self.assertIn("Named Stage Shares", profile_report)
             self.assertIn("color_transform", profile_report)
             self.assertIn("input_color", profile_report)
+            self.assertIn("Avg calls", profile_report)
+            self.assertIn("Sidecar elapsed", profile_report)
+            self.assertIn("Harness unattributed", profile_report)
             self.assertIn("profile_plots/stage-share.svg", profile_report)
             stage_summary = (out_dir / "profile_stage_summary.csv").read_text(
                 encoding="utf-8"
             )
             self.assertIn("stage_group", stage_summary)
+            self.assertIn("avg_calls", stage_summary)
+            self.assertIn("1.0", stage_summary)
             self.assertIn("color_transform", stage_summary)
             self.assertIn("input_color", stage_summary)
             self.assertTrue((out_dir / "profile_plots" / "stage-share.svg").exists())
+
+    def test_profile_report_lists_all_named_stage_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            out_dir = root / "profile"
+            corpus.mkdir()
+            Image.new("RGB", (2, 2), (1, 2, 3)).save(corpus / "sample.png")
+
+            def fake_tool_path(command: str) -> str | None:
+                return f"/bin/{command}"
+
+            def fake_encode(**kwargs):
+                kwargs["output_path"].write_bytes(b"jxl")
+                stage_timing_path = kwargs["stage_timing_path"]
+                self.assertIsNotNone(stage_timing_path)
+                stage_timing_path.write_text(
+                    json.dumps(
+                        {
+                            "stage_source": "rust_encoder_stage_spans",
+                            "elapsed_wall_seconds": 1.0,
+                            "total_stage_wall_seconds": 0.5,
+                            "unattributed_wall_seconds": 0.5,
+                            "stages": [
+                                {
+                                    "stage": f"custom_stage_{index:02d}",
+                                    "wall_seconds": 0.001 * (index + 1),
+                                    "calls": index + 1,
+                                }
+                                for index in range(25)
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return CommandResult(
+                    [
+                        "cjxl-rs",
+                        "input.png",
+                        "--stage-timing-json",
+                        str(stage_timing_path),
+                    ],
+                    0,
+                    1.0,
+                    "",
+                    "",
+                )
+
+            with (
+                patch("jxl_parity.profiler.tool_path", side_effect=fake_tool_path),
+                patch("jxl_parity.profiler.tool_supports_option", return_value=True),
+                patch("jxl_parity.profiler.encode", side_effect=fake_encode),
+            ):
+                run_profile(
+                    ProfileConfig(
+                        corpus=[corpus],
+                        out_dir=out_dir,
+                        cjxl="cjxl",
+                        jxl_encoder="cjxl-rs",
+                        encoder="jxl-encoder",
+                        modes=["vardct"],
+                        distances=[1.0],
+                        efforts=[7],
+                        max_images=None,
+                        keep_work=False,
+                        instrument_stages=True,
+                        samples=1,
+                        warmups=0,
+                    )
+                )
+
+            profile_report = (out_dir / "profile_report.md").read_text(encoding="utf-8")
+            self.assertIn("All aggregate stage timings", profile_report)
+            self.assertIn("custom_stage_00", profile_report)
+            self.assertIn("custom_stage_24", profile_report)
+            self.assertIn(
+                "| jxl-encoder | vardct | 1.0 | 7 | custom_stage_24 | custom | 1 | 25 |",
+                profile_report,
+            )
 
     def test_profile_reports_unsupported_inputs_as_skips(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

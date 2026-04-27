@@ -24,6 +24,7 @@ PROFILE_STAGE_SUMMARY_FIELDS = [
     "stage",
     "stage_group",
     "cases",
+    "avg_calls",
     "avg_seconds",
     "min_seconds",
     "median_seconds",
@@ -770,11 +771,12 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
                 "avg_seconds_per_mp": _average(seconds_per_mp),
             }
         )
-        stage_values: dict[str, list[tuple[float, float | None]]] = {}
+        stage_values: dict[str, list[tuple[float, float | None, float | None]]] = {}
         for match in matches:
             for stage in _aggregate_result_stage_timings(match):
                 seconds_value = stage.get("seconds")
                 seconds_per_mp_value = stage.get("seconds_per_mp")
+                calls_avg_value = stage.get("calls_avg")
                 if isinstance(seconds_value, int | float):
                     stage_values.setdefault(str(stage["stage"]), []).append(
                         (
@@ -784,6 +786,11 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
                                 if isinstance(seconds_per_mp_value, int | float)
                                 else None
                             ),
+                            (
+                                float(calls_avg_value)
+                                if isinstance(calls_avg_value, int | float)
+                                else None
+                            ),
                         )
                     )
         for stage_name, values in sorted(stage_values.items()):
@@ -791,6 +798,7 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
             stage_seconds_per_mp = [
                 value[1] for value in values if value[1] is not None
             ]
+            stage_calls = [value[2] for value in values if value[2] is not None]
             aggregates.append(
                 {
                     "encoder": encoder,
@@ -800,6 +808,7 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
                     "cases": len(values),
                     "stage": stage_name,
                     "stage_group": _stage_group(stage_name),
+                    "avg_calls": _average(stage_calls),
                     "avg_seconds": _average(stage_seconds),
                     "min_seconds": min(stage_seconds) if stage_seconds else None,
                     "median_seconds": (
@@ -917,12 +926,12 @@ def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
         or _to_float(row.get("avg_seconds"))
         or -1.0,
         reverse=True,
-    )[:20]
+    )
     lines = [
-        "Top aggregate stage timings by average seconds per megapixel.",
+        "All aggregate stage timings by average seconds per megapixel.",
         "",
-        "| Encoder | Mode | Distance | Effort | Stage | Group | Cases | Avg seconds | Seconds/MP | % of encode_total |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Encoder | Mode | Distance | Effort | Stage | Group | Cases | Avg calls | Avg seconds | Seconds/MP | % of encode_total |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     lines.extend(_stage_row_markdown(row) for row in rows)
 
@@ -936,23 +945,24 @@ def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
     if named_rows:
         lines.extend(
             [
-                "| Encoder | Mode | Distance | Effort | Stage | Group | Avg seconds | % of encode_total |",
-                "| --- | --- | --- | --- | --- | --- | --- | --- |",
+                "| Encoder | Mode | Distance | Effort | Stage | Group | Avg calls | Avg seconds | % of encode_total |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for row in sorted(
             named_rows,
             key=lambda item: _to_float(item.get("percent_of_encode_total")) or -1.0,
             reverse=True,
-        )[:20]:
+        ):
             lines.append(
-                "| {encoder} | {mode} | {distance} | {effort} | {stage} | {group} | {seconds} | {percent} |".format(
+                "| {encoder} | {mode} | {distance} | {effort} | {stage} | {group} | {calls} | {seconds} | {percent} |".format(
                     encoder=row["encoder"],
                     mode=row["mode"],
                     distance=_format_distance(row.get("distance")),
                     effort=row["effort"],
                     stage=row["stage"],
                     group=row["stage_group"],
+                    calls=_format_number(_to_float(row.get("avg_calls"))),
                     seconds=_format_number(_to_float(row.get("avg_seconds"))),
                     percent=_format_percent(row.get("percent_of_encode_total")),
                 )
@@ -965,7 +975,7 @@ def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
 
 
 def _stage_row_markdown(row: dict[str, object]) -> str:
-    return "| {encoder} | {mode} | {distance} | {effort} | {stage} | {group} | {cases} | {seconds} | {seconds_per_mp} | {percent} |".format(
+    return "| {encoder} | {mode} | {distance} | {effort} | {stage} | {group} | {cases} | {calls} | {seconds} | {seconds_per_mp} | {percent} |".format(
         encoder=row["encoder"],
         mode=row["mode"],
         distance=_format_distance(row.get("distance")),
@@ -973,10 +983,56 @@ def _stage_row_markdown(row: dict[str, object]) -> str:
         stage=row["stage"],
         group=row["stage_group"],
         cases=row["cases"],
+        calls=_format_number(_to_float(row.get("avg_calls"))),
         seconds=_format_number(_to_float(row.get("avg_seconds"))),
         seconds_per_mp=_format_number(_to_float(row.get("avg_seconds_per_mp"))),
         percent=_format_percent(row.get("percent_of_encode_total")),
     )
+
+
+def _stage_accounting_markdown(results: list[ProfileResult]) -> list[str]:
+    rows = []
+    for result in results:
+        accounting = _aggregate_stage_accounting(result)
+        if accounting is None:
+            continue
+        rows.append((result, accounting))
+
+    if not rows:
+        return [
+            "No sidecar accounting was available; only `encode_total` timing is present for this run."
+        ]
+
+    lines = [
+        "Sidecar accounting compares the Rust sidecar clock with the outer harness `encode_total` timing.",
+        "",
+        "| Image | Encoder | Mode | Distance | Effort | Samples | Sidecar elapsed | Named stage total | Sidecar unattributed | Harness unattributed |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for result, accounting in rows:
+        lines.append(
+            "| {image} | {encoder} | {mode} | {distance} | {effort} | {samples} | {elapsed} | {total} | {sidecar_unattributed} | {harness_unattributed} |".format(
+                image=result.image_id,
+                encoder=result.encoder,
+                mode=result.mode,
+                distance=_format_distance(result.distance),
+                effort=result.effort,
+                samples=accounting["sample_count"],
+                elapsed=_format_number(
+                    _to_float(accounting.get("sidecar_elapsed_seconds"))
+                ),
+                total=_format_number(
+                    _to_float(accounting.get("sidecar_total_stage_seconds"))
+                ),
+                sidecar_unattributed=_format_number(
+                    _to_float(accounting.get("sidecar_unattributed_seconds"))
+                ),
+                harness_unattributed=_format_number(
+                    _to_float(accounting.get("harness_unattributed_seconds"))
+                ),
+            )
+        )
+    return lines
 
 
 def _stage_plot_markdown(stage_plots: list[tuple[str, str]]) -> list[str]:
@@ -1228,6 +1284,10 @@ def _write_profile_report(
         "## Per-Stage Summary",
         "",
         *_stage_summary_markdown(stage_rows),
+        "",
+        "## Stage Accounting",
+        "",
+        *_stage_accounting_markdown(results),
         "",
         "## Per-Stage Plots",
         "",
