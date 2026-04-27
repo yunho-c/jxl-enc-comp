@@ -89,7 +89,9 @@ and decode succeed; quality and size are reported for comparison rather than
 treated as bit-exact pass/fail criteria.
 
 `paired_comparisons.csv` lines up libjxl and jxl-encoder rows for the same
-image/settings and reports size, quality, and encode-time ratios.
+image/settings and reports size, quality, and encode-time ratios. The HTML
+report also includes a paired encode-time chart that plots both encoders against
+image size, so runtime comparability is visible without opening the CSV.
 
 ## Report Artifacts
 

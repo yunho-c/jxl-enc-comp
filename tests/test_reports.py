@@ -3,9 +3,19 @@ from __future__ import annotations
 import csv
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
-from jxl_parity.reports import write_paired_comparisons
+from jxl_parity.reports import write_html, write_paired_comparisons
+
+
+@dataclass(frozen=True)
+class DummySummary:
+    images: int = 1
+    total_cases: int = 2
+    passed_cases: int = 2
+    failed_cases: int = 0
+    skipped_cases: int = 0
 
 
 class ReportTests(unittest.TestCase):
@@ -66,6 +76,49 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(float(comparison["ssimulacra2_delta_jxl_encoder_minus_libjxl"]), -4.0)
             self.assertEqual(float(comparison["butteraugli_delta_jxl_encoder_minus_libjxl"]), 0.5)
             self.assertAlmostEqual(float(comparison["encode_time_ratio_jxl_encoder_to_libjxl"]), 3.0)
+
+    def test_html_report_includes_paired_timing_by_image_size(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "report.html"
+            rows = [
+                {
+                    "image_id": "sample",
+                    "source_path": "sample.png",
+                    "encoder": "libjxl",
+                    "mode": "vardct",
+                    "distance": 1.0,
+                    "effort": 7,
+                    "status": "passed",
+                    "bits_per_pixel": 2.0,
+                    "psnr": 40.0,
+                    "ssimulacra2": 80.0,
+                    "butteraugli": 1.2,
+                    "encode_seconds": 0.2,
+                    "megapixels": 0.1,
+                },
+                {
+                    "image_id": "sample",
+                    "source_path": "sample.png",
+                    "encoder": "jxl-encoder",
+                    "mode": "vardct",
+                    "distance": 1.0,
+                    "effort": 7,
+                    "status": "passed",
+                    "bits_per_pixel": 3.0,
+                    "psnr": 38.5,
+                    "ssimulacra2": 76.0,
+                    "butteraugli": 1.7,
+                    "encode_seconds": 0.6,
+                    "megapixels": 0.1,
+                },
+            ]
+
+            write_html(output, DummySummary(), rows)
+
+            html = output.read_text(encoding="utf-8")
+            self.assertIn("Encode Time vs Image Size", html)
+            self.assertIn("Paired encode time by image size", html)
+            self.assertIn("jxl-encoder 0.600s", html)
 
 
 if __name__ == "__main__":

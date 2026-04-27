@@ -76,6 +76,7 @@ def write_html(path: Path, summary: object, rows: list[dict[str, object]]) -> No
     quality_chart = _scatter_svg(rows, "bits_per_pixel", "ssimulacra2", "Lossy size vs SSIMULACRA2")
     if quality_chart == "":
         quality_chart = _scatter_svg(rows, "bits_per_pixel", "psnr", "Lossy size vs PSNR")
+    paired_time_chart = _paired_time_svg(rows)
     time_chart = _time_svg(rows)
     paired_rows = _paired_comparison_rows(rows)
     paired_section = _section_table("Paired Encoder Comparison", paired_rows)
@@ -111,7 +112,11 @@ def write_html(path: Path, summary: object, rows: list[dict[str, object]]) -> No
     {quality_chart or "<p>No lossy quality data was available.</p>"}
   </section>
   <section>
-    <h2>Encode Time per Megapixel</h2>
+    <h2>Encode Time vs Image Size</h2>
+    {paired_time_chart or "<p>No paired timing data was available.</p>"}
+  </section>
+  <section>
+    <h2>Slowest Encode Cases</h2>
     {time_chart or "<p>No timing data was available.</p>"}
   </section>
   <section>
@@ -441,6 +446,83 @@ def _time_svg(rows: list[dict[str, object]]) -> str:
         bars.append(f'<rect x="{pad}" y="{y}" width="{bar_width:.1f}" height="14" fill="#0f766e" />')
         bars.append(f'<text x="{pad + bar_width + 6:.1f}" y="{y + 12}" font-size="12">{value:.3f}s/MP</text>')
     return f'<svg viewBox="0 0 {width} {height}" role="img">{"".join(bars)}</svg>'
+
+
+def _paired_time_svg(rows: list[dict[str, object]]) -> str:
+    grouped: dict[tuple[object, object, object, object], dict[str, dict[str, object]]] = {}
+    for row in rows:
+        key = (row["image_id"], row["mode"], row["distance"], row["effort"])
+        grouped.setdefault(key, {})[str(row["encoder"])] = row
+
+    pairs = []
+    for key in sorted(grouped, key=lambda item: tuple(str(part) for part in item)):
+        encoders = grouped[key]
+        libjxl = encoders.get("libjxl")
+        jxl_encoder = encoders.get("jxl-encoder")
+        if libjxl is None or jxl_encoder is None:
+            continue
+        if libjxl.get("status") != "passed" or jxl_encoder.get("status") != "passed":
+            continue
+        megapixels = _to_float(libjxl.get("megapixels"))
+        libjxl_seconds = _to_float(libjxl.get("encode_seconds"))
+        jxl_encoder_seconds = _to_float(jxl_encoder.get("encode_seconds"))
+        if megapixels in {None, 0.0} or libjxl_seconds is None or jxl_encoder_seconds is None:
+            continue
+        pairs.append((megapixels or 0.0, libjxl_seconds, jxl_encoder_seconds, libjxl, jxl_encoder))
+
+    if not pairs:
+        return ""
+
+    width, height = 760, 420
+    left, right, top, bottom = 70, 140, 48, 60
+    plot_width = width - left - right
+    plot_height = height - top - bottom
+    max_mp = max(megapixels for megapixels, *_ in pairs)
+    max_seconds = max(max(libjxl_seconds, jxl_encoder_seconds) for _, libjxl_seconds, jxl_encoder_seconds, *_ in pairs)
+    x_high = max_mp if max_mp > 0 else 1.0
+    y_high = max_seconds if max_seconds > 0 else 1.0
+
+    def scale_x(value: float) -> float:
+        return left + (value / x_high) * plot_width
+
+    def scale_y(value: float) -> float:
+        return top + plot_height - (value / y_high) * plot_height
+
+    pieces = [
+        '<text x="16" y="24" font-size="16" font-weight="600">Paired encode time by image size</text>',
+        f'<line x1="{left}" y1="{top + plot_height}" x2="{left + plot_width}" y2="{top + plot_height}" stroke="#71717a" />',
+        f'<line x1="{left}" y1="{top}" x2="{left}" y2="{top + plot_height}" stroke="#71717a" />',
+        f'<text x="{left}" y="{height - 18}" font-size="12">Image size: 0 - {x_high:.3g} MP</text>',
+        f'<text x="{width - right - 60}" y="{height - 18}" font-size="12">seconds</text>',
+        f'<text x="{left + plot_width + 20}" y="{top + 18}" font-size="12" fill="#2563eb">libjxl</text>',
+        f'<circle cx="{left + plot_width + 12}" cy="{top + 14}" r="5" fill="#2563eb" />',
+        f'<text x="{left + plot_width + 20}" y="{top + 38}" font-size="12" fill="#dc2626">jxl-encoder</text>',
+        f'<circle cx="{left + plot_width + 12}" cy="{top + 34}" r="5" fill="#dc2626" />',
+        f'<text x="16" y="{top + 8}" font-size="12">0 - {y_high:.3g}s</text>',
+    ]
+
+    for megapixels, libjxl_seconds, jxl_encoder_seconds, libjxl, jxl_encoder in pairs:
+        x = scale_x(megapixels)
+        libjxl_y = scale_y(libjxl_seconds)
+        jxl_encoder_y = scale_y(jxl_encoder_seconds)
+        distance = libjxl.get("distance")
+        quality = "lossless" if distance in {"", None} else f"d{distance}"
+        label_bits = f"{libjxl.get('image_id')} {libjxl.get('mode')} {quality} e{libjxl.get('effort')}"
+        label = html.escape(label_bits)
+        pieces.append(
+            f'<line x1="{x:.1f}" y1="{libjxl_y:.1f}" x2="{x:.1f}" y2="{jxl_encoder_y:.1f}" '
+            'stroke="#a1a1aa" stroke-width="1" opacity="0.7" />'
+        )
+        pieces.append(
+            f'<circle cx="{x:.1f}" cy="{libjxl_y:.1f}" r="4.5" fill="#2563eb" opacity="0.9">'
+            f"<title>{label} libjxl {libjxl_seconds:.3f}s</title></circle>"
+        )
+        pieces.append(
+            f'<circle cx="{x:.1f}" cy="{jxl_encoder_y:.1f}" r="4.5" fill="#dc2626" opacity="0.9">'
+            f"<title>{label} jxl-encoder {jxl_encoder_seconds:.3f}s</title></circle>"
+        )
+
+    return f'<svg viewBox="0 0 {width} {height}" role="img">{"".join(pieces)}</svg>'
 
 
 def _to_float(value: object) -> float | None:
