@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +51,8 @@ class FlamegraphTests(unittest.TestCase):
             self.assertIn("-d 1.5", summary.encoder_command)
             self.assertIn("--stage-timing-json", summary.encoder_command)
             self.assertTrue((out_dir / "run_flamegraph.sh").exists())
+            script = (out_dir / "run_flamegraph.sh").read_text(encoding="utf-8")
+            self.assertIn(f"cd {shlex.quote(str(Path.cwd()))}", script)
             self.assertTrue((out_dir / "encoder_command.txt").exists())
             self.assertTrue((out_dir / "flamegraph_command.txt").exists())
             self.assertTrue((out_dir / "README.md").exists())

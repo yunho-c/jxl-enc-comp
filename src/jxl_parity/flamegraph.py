@@ -192,6 +192,7 @@ def _write_command_artifacts(
 ) -> None:
     encoder_command = _shell_join(encoder_args)
     profiler_command = _shell_join(profiler_args)
+    working_directory = _shell_join([Path.cwd()])
     (out_dir / "encoder_command.txt").write_text(
         f"{encoder_command}\n", encoding="utf-8"
     )
@@ -204,6 +205,7 @@ def _write_command_artifacts(
             [
                 "#!/usr/bin/env bash",
                 "set -euo pipefail",
+                f"cd {working_directory}",
                 profiler_command,
                 "",
             ]
