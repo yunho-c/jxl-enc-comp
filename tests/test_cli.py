@@ -76,6 +76,24 @@ class CliTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--max-images must be at least 1", stderr.getvalue())
 
+    def test_profile_rejects_non_positive_samples(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["profile", "--samples", "0"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--samples must be at least 1", stderr.getvalue())
+
+    def test_profile_rejects_negative_warmups(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["profile", "--warmups", "-1"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--warmups must be at least 0", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

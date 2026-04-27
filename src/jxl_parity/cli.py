@@ -103,6 +103,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Limit the number of discovered images for a profiling smoke run.",
     )
     profile.add_argument(
+        "--samples",
+        type=int,
+        default=1,
+        help="Measured encode samples per image/settings case.",
+    )
+    profile.add_argument(
+        "--warmups",
+        type=int,
+        default=0,
+        help="Unmeasured warmup encodes before each profiled case.",
+    )
+    profile.add_argument(
         "--instrument-stages",
         action="store_true",
         help="Mark the run as intended for stage instrumentation and emit profiler guidance.",
@@ -155,6 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         distances = _parse_float_csv(parser, "--distances", args.distances, required=False, minimum=0.0)
         efforts = _parse_int_csv(parser, "--efforts", args.efforts, minimum=1)
         _validate_sweep(parser, modes, distances, args.max_images)
+        _validate_profile_counts(parser, args.samples, args.warmups)
         config = ProfileConfig(
             corpus=args.corpus,
             out_dir=args.out,
@@ -167,6 +180,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_images=args.max_images,
             keep_work=args.keep_work,
             instrument_stages=args.instrument_stages,
+            samples=args.samples,
+            warmups=args.warmups,
         )
         try:
             summary = run_profile(config)
@@ -265,6 +280,13 @@ def _validate_sweep(
         parser.error("--distances must include at least one value when vardct mode is enabled")
     if max_images is not None and max_images < 1:
         parser.error("--max-images must be at least 1")
+
+
+def _validate_profile_counts(parser: argparse.ArgumentParser, samples: int, warmups: int) -> None:
+    if samples < 1:
+        parser.error("--samples must be at least 1")
+    if warmups < 0:
+        parser.error("--warmups must be at least 0")
 
 
 if __name__ == "__main__":

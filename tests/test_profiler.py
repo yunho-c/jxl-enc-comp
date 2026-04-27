@@ -24,9 +24,11 @@ class ProfilerTests(unittest.TestCase):
             def fake_tool_path(command: str) -> str | None:
                 return f"/bin/{command}"
 
+            encode_seconds = iter([0.10, 0.25, 0.35])
+
             def fake_encode(**kwargs):
                 kwargs["output_path"].write_bytes(b"jxl")
-                return CommandResult(["cjxl-rs", "input.png"], 0, 0.25, "", "")
+                return CommandResult(["cjxl-rs", "input.png"], 0, next(encode_seconds), "", "")
 
             with (
                 patch("jxl_parity.profiler.tool_path", side_effect=fake_tool_path),
@@ -45,6 +47,8 @@ class ProfilerTests(unittest.TestCase):
                         max_images=None,
                         keep_work=False,
                         instrument_stages=True,
+                        samples=2,
+                        warmups=1,
                     )
                 )
 
@@ -53,7 +57,18 @@ class ProfilerTests(unittest.TestCase):
             stage_timing = json.loads((out_dir / "stage_timing.json").read_text(encoding="utf-8"))
             self.assertEqual(stage_timing["stage_source"], "wall_clock_encode_total")
             self.assertEqual(stage_timing["runs"][0]["stages"][0]["stage"], "encode_total")
+            self.assertEqual(stage_timing["runs"][0]["stages"][0]["sample_count"], 2)
+            self.assertEqual(stage_timing["runs"][0]["stages"][0]["warmup_count"], 1)
+            self.assertEqual(stage_timing["runs"][0]["stages"][0]["seconds"], 0.3)
+            profile_runs = (out_dir / "profile_runs.csv").read_text(encoding="utf-8")
+            self.assertIn("encode_seconds_median", profile_runs)
+            self.assertIn("0.3", profile_runs)
+            samples = json.loads((out_dir / "profile_samples.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(samples), 3)
+            self.assertTrue(samples[0]["warmup"])
+            self.assertFalse(samples[1]["warmup"])
             self.assertTrue((out_dir / "profile_runs.csv").exists())
+            self.assertTrue((out_dir / "profile_samples.csv").exists())
             self.assertIn("perf record", (out_dir / "profiler_commands.md").read_text(encoding="utf-8"))
 
     def test_profile_reports_unsupported_inputs_as_skips(self) -> None:
@@ -87,6 +102,7 @@ class ProfilerTests(unittest.TestCase):
                 "unsupported input format",
                 (out_dir / "profile_runs.csv").read_text(encoding="utf-8"),
             )
+            self.assertIn("sample_index", (out_dir / "profile_samples.csv").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
