@@ -539,9 +539,14 @@ def _example_command(config: ProfileConfig) -> str:
     command = config.cjxl if config.encoder == "libjxl" else config.jxl_encoder
     output = str(config.out_dir / "work" / "encoded" / "profile-example.jxl")
     input_path = "<reference.png>"
+    mode = config.modes[0]
+    distance = config.distances[0] if config.distances else None
     if config.encoder == "libjxl":
-        return f"{command} {input_path} {output} --quiet -e {config.efforts[0]} -d 0.0"
-    return f"{command} {input_path} {output} -e {config.efforts[0]} --lossless"
+        distance_arg = "0.0" if mode == "lossless" else str(distance)
+        return f"{command} {input_path} {output} --quiet -e {config.efforts[0]} -d {distance_arg}"
+    if mode == "lossless":
+        return f"{command} {input_path} {output} -e {config.efforts[0]} --lossless"
+    return f"{command} {input_path} {output} -e {config.efforts[0]} -d {distance}"
 
 
 def _requested_encoders(value: str) -> list[str]:

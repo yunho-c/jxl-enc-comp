@@ -9,10 +9,31 @@ from unittest.mock import patch
 from PIL import Image
 
 from jxl_parity.codecs import CommandResult
-from jxl_parity.profiler import ProfileConfig, run_profile
+from jxl_parity.profiler import ProfileConfig, _example_command, run_profile
 
 
 class ProfilerTests(unittest.TestCase):
+    def test_profiler_fallback_command_uses_selected_vardct_distance(self) -> None:
+        command = _example_command(
+            ProfileConfig(
+                corpus=[Path("corpus")],
+                out_dir=Path("reports/profile"),
+                cjxl="cjxl",
+                jxl_encoder="cjxl-rs",
+                encoder="jxl-encoder",
+                modes=["vardct"],
+                distances=[2.5],
+                efforts=[9],
+                max_images=None,
+                keep_work=False,
+                instrument_stages=True,
+            )
+        )
+
+        self.assertIn("-e 9", command)
+        self.assertIn("-d 2.5", command)
+        self.assertNotIn("--lossless", command)
+
     def test_profile_writes_stage_timing_and_profiler_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
