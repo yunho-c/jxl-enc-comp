@@ -22,6 +22,7 @@ PROFILE_STAGE_SUMMARY_FIELDS = [
     "distance",
     "effort",
     "stage",
+    "stage_group",
     "cases",
     "avg_seconds",
     "min_seconds",
@@ -31,6 +32,42 @@ PROFILE_STAGE_SUMMARY_FIELDS = [
     "avg_seconds_per_mp",
     "percent_of_encode_total",
 ]
+
+STAGE_GROUPS = {
+    "encode_total": "total",
+    "input_conversion": "input_color",
+    "pixel_layout": "input_color",
+    "color_transform": "input_color",
+    "reversible_color_transform": "input_color",
+    "color_xyb": "input_color",
+    "lf_image_generation": "vardct_frontend",
+    "block_strategy": "vardct_frontend",
+    "transform_selection": "vardct_frontend",
+    "adaptive_quantization": "vardct_frontend",
+    "butteraugli_rate_control": "vardct_frontend",
+    "block_stats": "vardct_frontend",
+    "ac_strategy_search": "vardct_frontend",
+    "quant_scoring": "vardct_frontend",
+    "dct_coefficient_generation": "vardct_coefficients",
+    "chroma_from_luma": "vardct_coefficients",
+    "gaborish_filtering": "vardct_coefficients",
+    "noise_synthesis": "vardct_coefficients",
+    "filter_simulation": "vardct_coefficients",
+    "transform_quantize": "vardct_coefficients",
+    "predictor_selection": "modular_modeling",
+    "residual_generation": "modular_modeling",
+    "palette_decisions": "modular_modeling",
+    "ma_tree_context_modeling": "modular_modeling",
+    "coefficient_tokenization": "entropy",
+    "histogram_construction": "entropy",
+    "histogram_clustering": "entropy",
+    "lz77_search": "entropy",
+    "ans_huffman_encoding": "entropy",
+    "entropy_prepass": "entropy",
+    "bit_writing": "bitstream",
+    "container_metadata": "bitstream",
+    "bitstream_write": "bitstream",
+}
 
 
 @dataclass(frozen=True)
@@ -502,6 +539,7 @@ def _stage_timing_payload(
             stages.append(
                 {
                     "stage": "encode_total",
+                    "stage_group": _stage_group("encode_total"),
                     "seconds": result.encode_seconds,
                     "seconds_per_mp": result.encode_seconds_per_mp,
                     "seconds_min": result.encode_seconds_min,
@@ -575,6 +613,7 @@ def _read_stage_timing(path: Path | None) -> dict[str, Any] | None:
         stages.append(
             {
                 "stage": name,
+                "stage_group": _stage_group(name),
                 "seconds": float(seconds),
                 "calls": int(calls) if isinstance(calls, int | float) else 1,
             }
@@ -638,6 +677,7 @@ def _aggregate_result_stage_timings(result: ProfileResult) -> list[dict[str, obj
         stages.append(
             {
                 "stage": name,
+                "stage_group": _stage_group(name),
                 "seconds": avg_seconds,
                 "seconds_per_mp": (
                     avg_seconds / result.megapixels
@@ -719,6 +759,7 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
                 "effort": effort,
                 "cases": len(matches),
                 "stage": "encode_total",
+                "stage_group": _stage_group("encode_total"),
                 "avg_seconds": _average(seconds),
                 "min_seconds": min(seconds) if seconds else None,
                 "median_seconds": statistics.median(seconds) if seconds else None,
@@ -758,6 +799,7 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
                     "effort": effort,
                     "cases": len(values),
                     "stage": stage_name,
+                    "stage_group": _stage_group(stage_name),
                     "avg_seconds": _average(stage_seconds),
                     "min_seconds": min(stage_seconds) if stage_seconds else None,
                     "median_seconds": (
@@ -799,6 +841,10 @@ def _stage_group_key(row: dict[str, object]) -> tuple[object, object, object, ob
     return (row["encoder"], row["mode"], row["distance"], row["effort"])
 
 
+def _stage_group(stage: str) -> str:
+    return STAGE_GROUPS.get(stage, "custom")
+
+
 def _percent(value: object, total: object) -> float | None:
     value_float = _to_float(value)
     total_float = _to_float(total)
@@ -815,7 +861,7 @@ def _write_profiler_commands(
         "# Profiler Commands",
         "",
         "Use `stage_timing.json` for corpus-level encode totals and `profile_samples.csv` for",
-        "per-sample variance. The stock encoder CLIs do not expose named JPEG XL stages.",
+        "per-sample variance. Stock encoder CLIs do not expose named JPEG XL stages.",
         "",
         "For internal stage attribution, run one of these commands around a representative",
         "encoder invocation:",
@@ -875,8 +921,8 @@ def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
     lines = [
         "Top aggregate stage timings by average seconds per megapixel.",
         "",
-        "| Encoder | Mode | Distance | Effort | Stage | Cases | Avg seconds | Seconds/MP | % of encode_total |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Encoder | Mode | Distance | Effort | Stage | Group | Cases | Avg seconds | Seconds/MP | % of encode_total |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     lines.extend(_stage_row_markdown(row) for row in rows)
 
@@ -890,8 +936,8 @@ def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
     if named_rows:
         lines.extend(
             [
-                "| Encoder | Mode | Distance | Effort | Stage | Avg seconds | % of encode_total |",
-                "| --- | --- | --- | --- | --- | --- | --- |",
+                "| Encoder | Mode | Distance | Effort | Stage | Group | Avg seconds | % of encode_total |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for row in sorted(
@@ -900,12 +946,13 @@ def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
             reverse=True,
         )[:20]:
             lines.append(
-                "| {encoder} | {mode} | {distance} | {effort} | {stage} | {seconds} | {percent} |".format(
+                "| {encoder} | {mode} | {distance} | {effort} | {stage} | {group} | {seconds} | {percent} |".format(
                     encoder=row["encoder"],
                     mode=row["mode"],
                     distance=_format_distance(row.get("distance")),
                     effort=row["effort"],
                     stage=row["stage"],
+                    group=row["stage_group"],
                     seconds=_format_number(_to_float(row.get("avg_seconds"))),
                     percent=_format_percent(row.get("percent_of_encode_total")),
                 )
@@ -918,12 +965,13 @@ def _stage_summary_markdown(stage_rows: list[dict[str, object]]) -> list[str]:
 
 
 def _stage_row_markdown(row: dict[str, object]) -> str:
-    return "| {encoder} | {mode} | {distance} | {effort} | {stage} | {cases} | {seconds} | {seconds_per_mp} | {percent} |".format(
+    return "| {encoder} | {mode} | {distance} | {effort} | {stage} | {group} | {cases} | {seconds} | {seconds_per_mp} | {percent} |".format(
         encoder=row["encoder"],
         mode=row["mode"],
         distance=_format_distance(row.get("distance")),
         effort=row["effort"],
         stage=row["stage"],
+        group=row["stage_group"],
         cases=row["cases"],
         seconds=_format_number(_to_float(row.get("avg_seconds"))),
         seconds_per_mp=_format_number(_to_float(row.get("avg_seconds_per_mp"))),
@@ -1132,15 +1180,19 @@ def _write_profile_report(
             "This run ingested named stages from `cjxl-rs --stage-timing-json` sidecars.",
             "Use `encode_total` as the outer wall-clock reference; named stages cover the",
             "instrumented Rust encoder spans and may leave unattributed setup or I/O time.",
+            "Known sidecar stages are also tagged with a reporting group so granular leaf",
+            "stages can be compared without measuring parent spans twice.",
         ]
         if has_sidecar_stages
         else [
             "Current runs can compare whole encode time across images, modes, distances, and efforts,",
-            "but cannot attribute time to color transform, block statistics, DCT/IDCT candidate",
-            "transforms, quantization scoring, filter simulation, or histogram prepass.",
+            "but cannot attribute time to leaf stages such as input conversion, color transform,",
+            "LF generation, transform selection, quantization, tokenization, histogram work,",
+            "entropy coding, bit writing, or container wrapping.",
             "",
-            "Getting those timings requires a custom `jxl-encoder` build that records spans inside",
-            "the Rust encoder and emits structured timing data for this harness to ingest.",
+            "Getting those timings requires a custom `jxl-encoder` build that records flat leaf",
+            "spans inside the Rust encoder and emits structured timing data for this harness",
+            "to ingest. Keep `encode_total` as the outer reference rather than replacing it.",
         ]
     )
 
@@ -1284,14 +1336,19 @@ def _stage_instrumentation_guidance_lines() -> list[str]:
         "`--instrument-stages` marks the run and emits profiling guidance; it does not",
         "change the encoder binary or expose internal spans by itself.",
         "",
-        "To get timings for color transform, block statistics, DCT/IDCT candidate transforms,",
-        "quantization scoring, filter simulation, and histogram prepass, use a custom",
-        "`jxl-encoder` build that:",
+        "To get granular timings for the VarDCT and Modular pipelines, use a custom",
+        "`jxl-encoder` build that emits flat leaf stages such as `input_conversion`,",
+        "`color_transform`, `block_strategy`, `transform_selection`, `adaptive_quantization`,",
+        "`dct_coefficient_generation`, `histogram_construction`, `ans_huffman_encoding`,",
+        "and `bit_writing`. Keep coarse phases as reporting groups rather than measured",
+        "parent spans so named-stage totals stay interpretable.",
         "",
-        "- adds a low-overhead stage timer in the Rust encoder;",
-        "- wraps the relevant VarDCT and modular functions with stable stage names;",
-        "- emits per-stage JSON through `cjxl-rs --stage-timing-json`; and",
-        "- runs `jxl-parity profile --instrument-stages` to merge sidecars into `stage_timing.json`.",
+        "That build should:",
+        "",
+        "- add a low-overhead stage timer in the Rust encoder;",
+        "- wrap the relevant VarDCT and Modular functions with stable leaf stage names;",
+        "- emit per-stage JSON through `cjxl-rs --stage-timing-json`; and",
+        "- run `jxl-parity profile --instrument-stages` to merge sidecars into `stage_timing.json`.",
         "",
     ]
 

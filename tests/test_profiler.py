@@ -220,10 +220,12 @@ class ProfilerTests(unittest.TestCase):
             self.assertIn("Per-Stage Summary", profile_report)
             self.assertIn("encode_total", profile_report)
             self.assertIn("profile_plots/stage-seconds-per-mp.svg", profile_report)
-            self.assertIn("cannot attribute time to color transform", profile_report)
+            self.assertIn("cannot attribute time to leaf stages", profile_report)
+            self.assertIn("container wrapping", profile_report)
             stage_summary = (out_dir / "profile_stage_summary.csv").read_text(
                 encoding="utf-8"
             )
+            self.assertIn("stage_group", stage_summary)
             self.assertIn("percent_of_encode_total", stage_summary)
             self.assertIn("encode_total", stage_summary)
             self.assertTrue(
@@ -236,7 +238,8 @@ class ProfilerTests(unittest.TestCase):
             self.assertIn("<reference.png>", profiler_commands)
             self.assertIn("--keep-work", profiler_commands)
             self.assertIn("Named Stage Timing", profiler_commands)
-            self.assertIn("use a custom\n`jxl-encoder` build", profiler_commands)
+            self.assertIn("flat leaf stages", profiler_commands)
+            self.assertIn("input_conversion", profiler_commands)
 
     def test_profile_ingests_jxl_encoder_stage_timing_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -266,7 +269,7 @@ class ProfilerTests(unittest.TestCase):
                             "unattributed_wall_seconds": 0.001,
                             "stages": [
                                 {
-                                    "stage": "color_xyb",
+                                    "stage": "color_transform",
                                     "wall_seconds": seconds,
                                     "calls": 1,
                                 }
@@ -316,6 +319,10 @@ class ProfilerTests(unittest.TestCase):
                 (out_dir / "profile_samples.json").read_text(encoding="utf-8")
             )
             self.assertEqual(samples[0]["stage_timing"]["stages"][0]["seconds"], 0.005)
+            self.assertEqual(
+                samples[0]["stage_timing"]["stages"][0]["stage_group"],
+                "input_color",
+            )
             self.assertEqual(samples[1]["stage_timing"]["stages"][0]["seconds"], 0.01)
 
             stage_timing = json.loads(
@@ -326,9 +333,10 @@ class ProfilerTests(unittest.TestCase):
                 stage["stage"]: stage for stage in stage_timing["runs"][0]["stages"]
             }
             self.assertEqual(stages["encode_total"]["seconds"], 0.3)
-            self.assertEqual(stages["color_xyb"]["seconds"], 0.02)
-            self.assertEqual(stages["color_xyb"]["sample_count"], 2)
-            self.assertEqual(stages["color_xyb"]["warmup_count"], 1)
+            self.assertEqual(stages["color_transform"]["seconds"], 0.02)
+            self.assertEqual(stages["color_transform"]["stage_group"], "input_color")
+            self.assertEqual(stages["color_transform"]["sample_count"], 2)
+            self.assertEqual(stages["color_transform"]["warmup_count"], 1)
             self.assertEqual(
                 stage_timing["runs"][0]["stage_accounting"]["sample_count"], 2
             )
@@ -345,15 +353,21 @@ class ProfilerTests(unittest.TestCase):
                 0.27999999999999997,
             )
             aggregates = {entry["stage"]: entry for entry in stage_timing["aggregates"]}
-            self.assertEqual(aggregates["color_xyb"]["avg_seconds"], 0.02)
+            self.assertEqual(aggregates["color_transform"]["avg_seconds"], 0.02)
+            self.assertEqual(
+                aggregates["color_transform"]["stage_group"], "input_color"
+            )
             profile_report = (out_dir / "profile_report.md").read_text(encoding="utf-8")
             self.assertIn("Named Stage Shares", profile_report)
-            self.assertIn("color_xyb", profile_report)
+            self.assertIn("color_transform", profile_report)
+            self.assertIn("input_color", profile_report)
             self.assertIn("profile_plots/stage-share.svg", profile_report)
             stage_summary = (out_dir / "profile_stage_summary.csv").read_text(
                 encoding="utf-8"
             )
-            self.assertIn("color_xyb", stage_summary)
+            self.assertIn("stage_group", stage_summary)
+            self.assertIn("color_transform", stage_summary)
+            self.assertIn("input_color", stage_summary)
             self.assertTrue((out_dir / "profile_plots" / "stage-share.svg").exists())
 
     def test_profile_reports_unsupported_inputs_as_skips(self) -> None:

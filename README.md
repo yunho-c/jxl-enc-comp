@@ -176,8 +176,9 @@ aggregate timing. `stage_timing.json` records top-level encode wall time as
 `encode_total`; when multiple samples are used, `encode_seconds` is the
 measured-sample average and min/median/max/stdev are included alongside it.
 `profile_stage_summary.csv` aggregates encode-total and named-stage timings by
-encoder, mode, distance, and effort. `profile_report.md` embeds those rows as
-tables and writes SVG plots under `profile_plots/` for quick visual comparison.
+encoder, mode, distance, effort, and reporting group. `profile_report.md`
+embeds those rows as tables and writes SVG plots under `profile_plots/` for
+quick visual comparison.
 
 From a checkout, profile sweeps can also be run through `just`:
 
@@ -192,7 +193,9 @@ merges the named Rust encoder stages into `profile_samples.json` and
 `stage_timing.json`. `stage_timing.json` also summarizes sidecar accounting per
 case, including named-stage total time and unattributed time. `encode_total`
 remains the outer process wall-clock timing so stage overhead and unattributed
-setup or I/O time stay visible.
+setup or I/O time stay visible. Known sidecar stage names are tagged with a
+`stage_group` such as `input_color`, `vardct_frontend`, `entropy`, or
+`bitstream`; unknown names are preserved with `stage_group: custom`.
 
 Some encoder paths may accept the sidecar flag but emit no named stages. In that
 case the CLI reports `stage_timing=encode_total only (no named sidecar stages
