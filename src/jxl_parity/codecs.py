@@ -39,9 +39,17 @@ def encode(
     mode: str,
     effort: int,
     distance: float | None,
+    stage_timing_path: Path | None = None,
 ) -> CommandResult:
     if encoder == "libjxl":
-        args = [command, str(input_path), str(output_path), "--quiet", "-e", str(effort)]
+        args = [
+            command,
+            str(input_path),
+            str(output_path),
+            "--quiet",
+            "-e",
+            str(effort),
+        ]
         if mode == "lossless":
             args.extend(["-d", "0.0"])
         else:
@@ -52,6 +60,8 @@ def encode(
             args.append("--lossless")
         else:
             args.extend(["-d", str(distance)])
+        if stage_timing_path is not None:
+            args.extend(["--stage-timing-json", str(stage_timing_path)])
     else:
         raise ValueError(f"unknown encoder: {encoder}")
     return run_command(args)
@@ -72,4 +82,3 @@ def run_command(args: list[str]) -> CommandResult:
         stdout=completed.stdout,
         stderr=completed.stderr,
     )
-

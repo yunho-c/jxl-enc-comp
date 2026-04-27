@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import shlex
 import statistics
@@ -97,6 +98,7 @@ class ProfileSample:
     encode_seconds_per_mp: float | None
     command: str | None
     stderr: str | None
+    stage_timing: dict[str, Any] | None = None
 
 
 def run_profile(config: ProfileConfig) -> ProfileSummary:
@@ -121,8 +123,16 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
             for effort in config.efforts:
                 for distance in distances:
                     for encoder_name in requested_encoders:
-                        command = config.cjxl if encoder_name == "libjxl" else config.jxl_encoder
-                        available = tool_status["cjxl"] if encoder_name == "libjxl" else tool_status["jxl_encoder"]
+                        command = (
+                            config.cjxl
+                            if encoder_name == "libjxl"
+                            else config.jxl_encoder
+                        )
+                        available = (
+                            tool_status["cjxl"]
+                            if encoder_name == "libjxl"
+                            else tool_status["jxl_encoder"]
+                        )
                         result, case_samples = _profile_case(
                             image=image,
                             encoder_name=encoder_name,
@@ -134,6 +144,7 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
                             encoded_dir=encoded_dir,
                             samples=config.samples,
                             warmups=config.warmups,
+                            instrument_stages=config.instrument_stages,
                         )
                         results.append(result)
                         samples.extend(case_samples)
@@ -187,6 +198,7 @@ def _profile_case(
     encoded_dir: Path,
     samples: int,
     warmups: int,
+    instrument_stages: bool,
 ) -> tuple[ProfileResult, list[ProfileSample]]:
     result = ProfileResult(
         image_id=image.image_id,
@@ -222,6 +234,7 @@ def _profile_case(
     case_id = _case_id(image.image_id, encoder_name, mode, effort, distance)
     case_samples: list[ProfileSample] = []
     measured_seconds: list[float] = []
+    measured_stage_timings: list[dict[str, Any]] = []
 
     for warmup_index in range(warmups):
         sample = _run_profile_sample(
@@ -234,6 +247,11 @@ def _profile_case(
             encoded_path=encoded_dir / f"{case_id}-warmup{warmup_index + 1}.jxl",
             sample_index=warmup_index + 1,
             warmup=True,
+            stage_timing_path=(
+                _stage_timing_path(encoded_dir, case_id, "warmup", warmup_index + 1)
+                if instrument_stages and encoder_name == "jxl-encoder"
+                else None
+            ),
         )
         case_samples.append(sample)
         if sample.status != "completed":
@@ -254,6 +272,11 @@ def _profile_case(
             encoded_path=encoded_dir / f"{case_id}-sample{sample_index + 1}.jxl",
             sample_index=sample_index + 1,
             warmup=False,
+            stage_timing_path=(
+                _stage_timing_path(encoded_dir, case_id, "sample", sample_index + 1)
+                if instrument_stages and encoder_name == "jxl-encoder"
+                else None
+            ),
         )
         case_samples.append(sample)
         result.command = sample.command
@@ -265,6 +288,8 @@ def _profile_case(
             return result, case_samples
         if sample.encode_seconds is not None:
             measured_seconds.append(sample.encode_seconds)
+        if sample.stage_timing is not None:
+            measured_stage_timings.append(sample.stage_timing)
         result.encoded_bytes = sample.encoded_bytes
         result.bits_per_pixel = sample.bits_per_pixel
 
@@ -277,11 +302,17 @@ def _profile_case(
         else None
     )
     result.encode_seconds_min = min(measured_seconds) if measured_seconds else None
-    result.encode_seconds_median = statistics.median(measured_seconds) if measured_seconds else None
+    result.encode_seconds_median = (
+        statistics.median(measured_seconds) if measured_seconds else None
+    )
     result.encode_seconds_max = max(measured_seconds) if measured_seconds else None
-    result.encode_seconds_stdev = statistics.stdev(measured_seconds) if len(measured_seconds) > 1 else None
+    result.encode_seconds_stdev = (
+        statistics.stdev(measured_seconds) if len(measured_seconds) > 1 else None
+    )
     result.status = "completed"
     result.reason = "ok"
+    if measured_stage_timings:
+        result.extra = {"stage_timing_samples": measured_stage_timings}
     return result, case_samples
 
 
@@ -296,7 +327,10 @@ def _run_profile_sample(
     encoded_path: Path,
     sample_index: int,
     warmup: bool,
+    stage_timing_path: Path | None,
 ) -> ProfileSample:
+    if stage_timing_path is not None:
+        stage_timing_path.unlink(missing_ok=True)
     encode_result = encode(
         encoder=encoder_name,
         command=encoder_command,
@@ -305,9 +339,14 @@ def _run_profile_sample(
         mode=mode,
         effort=effort,
         distance=distance,
+        stage_timing_path=stage_timing_path,
     )
     command = encode_result.command_text
-    seconds_per_mp = encode_result.elapsed_seconds / image.megapixels if image.megapixels > 0 else None
+    seconds_per_mp = (
+        encode_result.elapsed_seconds / image.megapixels
+        if image.megapixels > 0
+        else None
+    )
     if not encode_result.ok:
         return ProfileSample(
             image_id=image.image_id,
@@ -327,9 +366,13 @@ def _run_profile_sample(
             encode_seconds_per_mp=seconds_per_mp,
             command=command,
             stderr=encode_result.stderr.strip()[-4000:],
+            stage_timing=None,
         )
 
     encoded_bytes = encoded_path.stat().st_size
+    stage_timing = (
+        _read_stage_timing(stage_timing_path) if stage_timing_path is not None else None
+    )
     return ProfileSample(
         image_id=image.image_id,
         source_path=str(image.source_path),
@@ -348,10 +391,14 @@ def _run_profile_sample(
         encode_seconds_per_mp=seconds_per_mp,
         command=command,
         stderr=None,
+        stage_timing=stage_timing,
     )
 
 
-def _stage_timing_payload(summary: ProfileSummary, results: list[ProfileResult]) -> dict[str, object]:
+def _stage_timing_payload(
+    summary: ProfileSummary, results: list[ProfileResult]
+) -> dict[str, object]:
+    has_sidecar_stages = any(_stage_timing_samples(result) for result in results)
     runs = []
     for result in results:
         stages = []
@@ -369,6 +416,7 @@ def _stage_timing_payload(summary: ProfileSummary, results: list[ProfileResult])
                     "warmup_count": result.warmup_count,
                 }
             )
+        stages.extend(_aggregate_result_stage_timings(result))
         runs.append(
             {
                 "image_id": result.image_id,
@@ -384,15 +432,122 @@ def _stage_timing_payload(summary: ProfileSummary, results: list[ProfileResult])
     return {
         "schema_version": 1,
         "summary": asdict(summary),
-        "stage_source": "wall_clock_encode_total",
-        "note": (
-            "The stock encoder CLIs do not expose internal JPEG XL stage timings. "
-            "This file records top-level encode wall time as encode_total; use "
-            "profiler_commands.md to capture internal stacks or flamegraphs."
+        "stage_source": (
+            "jxl_encoder_stage_sidecar"
+            if has_sidecar_stages
+            else "wall_clock_encode_total"
         ),
+        "note": _stage_timing_note(has_sidecar_stages),
         "runs": runs,
         "aggregates": _aggregate_stage_totals(results),
     }
+
+
+def _stage_timing_note(has_sidecar_stages: bool) -> str:
+    if has_sidecar_stages:
+        return (
+            "Named stages come from jxl-encoder --stage-timing-json sidecars when "
+            "`--instrument-stages` is used with a compatible cjxl-rs binary. "
+            "encode_total remains the outer harness wall-clock measurement."
+        )
+    return (
+        "The stock encoder CLIs do not expose internal JPEG XL stage timings. "
+        "This file records top-level encode wall time as encode_total; use "
+        "profiler_commands.md to capture internal stacks or flamegraphs."
+    )
+
+
+def _read_stage_timing(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    stages = []
+    for stage in payload.get("stages", []):
+        if not isinstance(stage, dict):
+            continue
+        name = stage.get("stage")
+        seconds = stage.get("wall_seconds")
+        if not isinstance(name, str) or not isinstance(seconds, int | float):
+            continue
+        calls = stage.get("calls", 1)
+        stages.append(
+            {
+                "stage": name,
+                "seconds": float(seconds),
+                "calls": int(calls) if isinstance(calls, int | float) else 1,
+            }
+        )
+    if not stages:
+        return None
+    return {
+        "path": str(path),
+        "stage_source": payload.get("stage_source"),
+        "elapsed_wall_seconds": payload.get("elapsed_wall_seconds"),
+        "total_stage_wall_seconds": payload.get("total_stage_wall_seconds"),
+        "unattributed_wall_seconds": payload.get("unattributed_wall_seconds"),
+        "stages": stages,
+    }
+
+
+def _stage_timing_path(encoded_dir: Path, case_id: str, kind: str, index: int) -> Path:
+    return encoded_dir / f"{case_id}-{kind}{index}.stage-timing.json"
+
+
+def _stage_timing_samples(result: ProfileResult) -> list[dict[str, Any]]:
+    if not result.extra:
+        return []
+    samples = result.extra.get("stage_timing_samples")
+    if not isinstance(samples, list):
+        return []
+    return [sample for sample in samples if isinstance(sample, dict)]
+
+
+def _aggregate_result_stage_timings(result: ProfileResult) -> list[dict[str, object]]:
+    samples = _stage_timing_samples(result)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for sample in samples:
+        for stage in sample.get("stages", []):
+            if not isinstance(stage, dict):
+                continue
+            name = stage.get("stage")
+            seconds = stage.get("seconds")
+            if isinstance(name, str) and isinstance(seconds, int | float):
+                grouped.setdefault(name, []).append(stage)
+
+    stages = []
+    for name, stage_samples in sorted(grouped.items()):
+        seconds = [float(stage["seconds"]) for stage in stage_samples]
+        calls = [
+            int(stage.get("calls", 1))
+            for stage in stage_samples
+            if isinstance(stage.get("calls", 1), int | float)
+        ]
+        avg_seconds = _average(seconds)
+        stages.append(
+            {
+                "stage": name,
+                "seconds": avg_seconds,
+                "seconds_per_mp": (
+                    avg_seconds / result.megapixels
+                    if avg_seconds is not None and result.megapixels > 0
+                    else None
+                ),
+                "seconds_min": min(seconds) if seconds else None,
+                "seconds_median": statistics.median(seconds) if seconds else None,
+                "seconds_max": max(seconds) if seconds else None,
+                "seconds_stdev": (
+                    statistics.stdev(seconds) if len(seconds) > 1 else None
+                ),
+                "sample_count": len(seconds),
+                "warmup_count": result.warmup_count,
+                "calls_avg": _average(calls),
+            }
+        )
+    return stages
 
 
 def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, object]]:
@@ -400,13 +555,23 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
     for result in results:
         if result.status != "completed":
             continue
-        grouped.setdefault((result.encoder, result.mode, result.distance, result.effort), []).append(result)
+        grouped.setdefault(
+            (result.encoder, result.mode, result.distance, result.effort), []
+        ).append(result)
 
     aggregates = []
-    for (encoder, mode, distance, effort), matches in sorted(grouped.items(), key=lambda item: str(item[0])):
-        seconds = [match.encode_seconds for match in matches if match.encode_seconds is not None]
+    for (encoder, mode, distance, effort), matches in sorted(
+        grouped.items(), key=lambda item: str(item[0])
+    ):
+        seconds = [
+            match.encode_seconds
+            for match in matches
+            if match.encode_seconds is not None
+        ]
         seconds_per_mp = [
-            match.encode_seconds_per_mp for match in matches if match.encode_seconds_per_mp is not None
+            match.encode_seconds_per_mp
+            for match in matches
+            if match.encode_seconds_per_mp is not None
         ]
         aggregates.append(
             {
@@ -420,14 +585,61 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
                 "min_seconds": min(seconds) if seconds else None,
                 "median_seconds": statistics.median(seconds) if seconds else None,
                 "max_seconds": max(seconds) if seconds else None,
-                "stdev_seconds": statistics.stdev(seconds) if len(seconds) > 1 else None,
+                "stdev_seconds": (
+                    statistics.stdev(seconds) if len(seconds) > 1 else None
+                ),
                 "avg_seconds_per_mp": _average(seconds_per_mp),
             }
         )
+        stage_values: dict[str, list[tuple[float, float | None]]] = {}
+        for match in matches:
+            for stage in _aggregate_result_stage_timings(match):
+                seconds_value = stage.get("seconds")
+                seconds_per_mp_value = stage.get("seconds_per_mp")
+                if isinstance(seconds_value, int | float):
+                    stage_values.setdefault(str(stage["stage"]), []).append(
+                        (
+                            float(seconds_value),
+                            (
+                                float(seconds_per_mp_value)
+                                if isinstance(seconds_per_mp_value, int | float)
+                                else None
+                            ),
+                        )
+                    )
+        for stage_name, values in sorted(stage_values.items()):
+            stage_seconds = [value[0] for value in values]
+            stage_seconds_per_mp = [
+                value[1] for value in values if value[1] is not None
+            ]
+            aggregates.append(
+                {
+                    "encoder": encoder,
+                    "mode": mode,
+                    "distance": distance,
+                    "effort": effort,
+                    "cases": len(values),
+                    "stage": stage_name,
+                    "avg_seconds": _average(stage_seconds),
+                    "min_seconds": min(stage_seconds) if stage_seconds else None,
+                    "median_seconds": (
+                        statistics.median(stage_seconds) if stage_seconds else None
+                    ),
+                    "max_seconds": max(stage_seconds) if stage_seconds else None,
+                    "stdev_seconds": (
+                        statistics.stdev(stage_seconds)
+                        if len(stage_seconds) > 1
+                        else None
+                    ),
+                    "avg_seconds_per_mp": _average(stage_seconds_per_mp),
+                }
+            )
     return aggregates
 
 
-def _write_profiler_commands(path: Path, config: ProfileConfig, results: list[ProfileResult]) -> None:
+def _write_profiler_commands(
+    path: Path, config: ProfileConfig, results: list[ProfileResult]
+) -> None:
     examples = _profiler_command_examples(config, results)
     lines = [
         "# Profiler Commands",
@@ -486,19 +698,52 @@ def _write_profile_report(
     config: ProfileConfig,
 ) -> None:
     completed = [result for result in results if result.status == "completed"]
+    has_sidecar_stages = any(_stage_timing_samples(result) for result in results)
     slowest = sorted(
         completed,
         key=lambda result: (
-            result.encode_seconds_per_mp if result.encode_seconds_per_mp is not None else -1.0
+            result.encode_seconds_per_mp
+            if result.encode_seconds_per_mp is not None
+            else -1.0
         ),
         reverse=True,
     )[:10]
 
+    intro = (
+        "This report summarizes encode-total profiling runs and named stages collected from "
+        "`jxl-encoder` sidecars."
+        if has_sidecar_stages
+        else (
+            "This report summarizes encode-total profiling runs. It does not contain named JPEG XL\n"
+            "internal stages because the stock encoder CLIs do not expose them."
+        )
+    )
+    stage_artifact = (
+        "encode-total timing plus ingested jxl-encoder sidecar stages."
+        if has_sidecar_stages
+        else "encode-total timing shaped as stage data for downstream tools."
+    )
+    feasibility_lines = (
+        [
+            "This run ingested named stages from `cjxl-rs --stage-timing-json` sidecars.",
+            "Use `encode_total` as the outer wall-clock reference; named stages cover the",
+            "instrumented Rust encoder spans and may leave unattributed setup or I/O time.",
+        ]
+        if has_sidecar_stages
+        else [
+            "Current runs can compare whole encode time across images, modes, distances, and efforts,",
+            "but cannot attribute time to color transform, block statistics, DCT/IDCT candidate",
+            "transforms, quantization scoring, filter simulation, or histogram prepass.",
+            "",
+            "Getting those timings requires a custom `jxl-encoder` build that records spans inside",
+            "the Rust encoder and emits structured timing data for this harness to ingest.",
+        ]
+    )
+
     lines = [
         "# Profile Report",
         "",
-        "This report summarizes encode-total profiling runs. It does not contain named JPEG XL",
-        "internal stages because the stock encoder CLIs do not expose them.",
+        *intro.splitlines(),
         "",
         "## Summary",
         "",
@@ -515,17 +760,12 @@ def _write_profile_report(
         "",
         "- `profile_runs.csv` / `profile_runs.json`: one aggregate row per image/settings/encoder case.",
         "- `profile_samples.csv` / `profile_samples.json`: one row per warmup and measured encode invocation.",
-        "- `stage_timing.json`: encode-total timing shaped as stage data for downstream tools.",
+        f"- `stage_timing.json`: {stage_artifact}",
         "- `profiler_commands.md`: perf/samply/flamegraph command templates for stack attribution.",
         "",
         "## Stage Timing Feasibility",
         "",
-        "Current runs can compare whole encode time across images, modes, distances, and efforts,",
-        "but cannot attribute time to color transform, block statistics, DCT/IDCT candidate",
-        "transforms, quantization scoring, filter simulation, or histogram prepass.",
-        "",
-        "Getting those timings requires a custom `jxl-encoder` build that records spans inside",
-        "the Rust encoder and emits structured timing data for this harness to ingest.",
+        *feasibility_lines,
         "",
         "## Slowest Completed Cases",
         "",
@@ -566,7 +806,11 @@ def _profiler_command_examples(
     results: list[ProfileResult],
 ) -> list[tuple[str, str]]:
     if config.keep_work:
-        completed = [result for result in results if result.status == "completed" and result.command]
+        completed = [
+            result
+            for result in results
+            if result.status == "completed" and result.command
+        ]
         if completed:
             examples: list[tuple[str, str]] = []
             seen: set[str] = set()
@@ -581,7 +825,10 @@ def _profiler_command_examples(
 
 def _example_commands(config: ProfileConfig) -> list[tuple[str, str]]:
     return [
-        (f"{encoder_name} fallback command", _example_command_for_encoder(config, encoder_name))
+        (
+            f"{encoder_name} fallback command",
+            _example_command_for_encoder(config, encoder_name),
+        )
         for encoder_name in _requested_encoders(config.encoder)
     ]
 
@@ -594,10 +841,25 @@ def _example_command_for_encoder(config: ProfileConfig, encoder_name: str) -> st
     distance = config.distances[0] if config.distances else None
     if encoder_name == "libjxl":
         distance_arg = "0.0" if mode == "lossless" else str(distance)
-        return _shell_join([command, input_path, output, "--quiet", "-e", config.efforts[0], "-d", distance_arg])
+        return _shell_join(
+            [
+                command,
+                input_path,
+                output,
+                "--quiet",
+                "-e",
+                config.efforts[0],
+                "-d",
+                distance_arg,
+            ]
+        )
     if mode == "lossless":
-        return _shell_join([command, input_path, output, "-e", config.efforts[0], "--lossless"])
-    return _shell_join([command, input_path, output, "-e", config.efforts[0], "-d", distance])
+        return _shell_join(
+            [command, input_path, output, "-e", config.efforts[0], "--lossless"]
+        )
+    return _shell_join(
+        [command, input_path, output, "-e", config.efforts[0], "-d", distance]
+    )
 
 
 def _stage_instrumentation_guidance_lines() -> list[str]:
@@ -614,8 +876,8 @@ def _stage_instrumentation_guidance_lines() -> list[str]:
         "",
         "- adds a low-overhead stage timer in the Rust encoder;",
         "- wraps the relevant VarDCT and modular functions with stable stage names;",
-        "- emits per-stage JSON or JSONL to stderr or a sidecar file;",
-        "- has `jxl-parity profile` collect that sidecar and merge it into `stage_timing.json`.",
+        "- emits per-stage JSON through `cjxl-rs --stage-timing-json`; and",
+        "- runs `jxl-parity profile --instrument-stages` to merge sidecars into `stage_timing.json`.",
         "",
     ]
 
@@ -628,7 +890,9 @@ def _requested_encoders(value: str) -> list[str]:
     raise ValueError(f"unknown encoder: {value}")
 
 
-def _case_id(image_id: str, encoder: str, mode: str, effort: int, distance: float | None) -> str:
+def _case_id(
+    image_id: str, encoder: str, mode: str, effort: int, distance: float | None
+) -> str:
     quality = "lossless" if distance is None else f"d{distance:g}".replace(".", "p")
     return f"{image_id}-{encoder}-{mode}-{quality}-e{effort}".replace("/", "-")
 
