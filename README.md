@@ -162,8 +162,10 @@ The profile command writes:
 - `profile_runs.csv`
 - `profile_samples.json`
 - `profile_samples.csv`
+- `profile_stage_summary.csv`
 - `stage_timing.json`
 - `profile_report.md`
+- `profile_plots/`
 - `profiler_commands.md`
 
 `profile_runs.csv` and `profile_runs.json` have one aggregate row per
@@ -173,6 +175,16 @@ variance before comparing encoders. Warmups are recorded there but excluded from
 aggregate timing. `stage_timing.json` records top-level encode wall time as
 `encode_total`; when multiple samples are used, `encode_seconds` is the
 measured-sample average and min/median/max/stdev are included alongside it.
+`profile_stage_summary.csv` aggregates encode-total and named-stage timings by
+encoder, mode, distance, and effort. `profile_report.md` embeds those rows as
+tables and writes SVG plots under `profile_plots/` for quick visual comparison.
+
+From a checkout, profile sweeps can also be run through `just`:
+
+```bash
+just profile --encoder jxl-encoder --instrument-stages --max-images 1
+just profile-smoke
+```
 
 When `--instrument-stages` is used with a compatible `cjxl-rs` build that
 supports `--stage-timing-json`, the harness writes per-sample sidecars and
