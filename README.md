@@ -176,9 +176,9 @@ aggregate timing. `stage_timing.json` records top-level encode wall time as
 `encode_total`; when multiple samples are used, `encode_seconds` is the
 measured-sample average and min/median/max/stdev are included alongside it.
 `profile_stage_summary.csv` aggregates encode-total and named-stage timings by
-encoder, mode, distance, effort, and reporting group. `profile_report.md`
-embeds those rows as tables and writes SVG plots under `profile_plots/` for
-quick visual comparison.
+encoder, mode, distance, and effort, with reporting-group metadata included for
+each stage. `profile_report.md` embeds those rows as tables and writes SVG plots
+under `profile_plots/` for quick visual comparison.
 
 From a checkout, profile sweeps can also be run through `just`:
 
