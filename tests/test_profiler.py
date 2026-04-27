@@ -69,7 +69,13 @@ class ProfilerTests(unittest.TestCase):
             self.assertFalse(samples[1]["warmup"])
             self.assertTrue((out_dir / "profile_runs.csv").exists())
             self.assertTrue((out_dir / "profile_samples.csv").exists())
-            self.assertIn("perf record", (out_dir / "profiler_commands.md").read_text(encoding="utf-8"))
+            profile_report = (out_dir / "profile_report.md").read_text(encoding="utf-8")
+            self.assertIn("profile_samples.csv", profile_report)
+            self.assertIn("Measured samples per case: 2", profile_report)
+            profiler_commands = (out_dir / "profiler_commands.md").read_text(encoding="utf-8")
+            self.assertIn("perf record", profiler_commands)
+            self.assertIn("<reference.png>", profiler_commands)
+            self.assertIn("--keep-work", profiler_commands)
 
     def test_profile_reports_unsupported_inputs_as_skips(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

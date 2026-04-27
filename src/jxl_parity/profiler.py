@@ -160,6 +160,7 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
     write_json(out_dir / "profile_samples.json", sample_rows)
     write_csv(out_dir / "profile_samples.csv", sample_rows, _csv_fields(ProfileSample))
     write_json(out_dir / "stage_timing.json", _stage_timing_payload(summary, results))
+    _write_profile_report(out_dir / "profile_report.md", summary, results, config)
     _write_profiler_commands(out_dir / "profiler_commands.md", config, results)
 
     if not config.keep_work:
@@ -422,12 +423,15 @@ def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, obje
 
 def _write_profiler_commands(path: Path, config: ProfileConfig, results: list[ProfileResult]) -> None:
     completed = [result for result in results if result.status == "completed" and result.command]
-    example = completed[0].command if completed else _example_command(config)
+    example = completed[0].command if completed and config.keep_work else _example_command(config)
     lines = [
         "# Profiler Commands",
         "",
-        "Use `stage_timing.json` for corpus-level encode totals. For internal stage attribution,",
-        "run one of these commands around a representative encoder invocation:",
+        "Use `stage_timing.json` for corpus-level encode totals and `profile_samples.csv` for",
+        "per-sample variance. The stock encoder CLIs do not expose named JPEG XL stages.",
+        "",
+        "For internal stage attribution, run one of these commands around a representative",
+        "encoder invocation:",
         "",
         "```bash",
         f"perf record --call-graph dwarf -- {example}",
@@ -446,6 +450,84 @@ def _write_profiler_commands(path: Path, config: ProfileConfig, results: list[Pr
         "treating a hot `jxl-encoder` stage as representative of libjxl.",
         "",
     ]
+    if not config.keep_work:
+        lines.extend(
+            [
+                "The profile run removed its normalized work files. Replace `<reference.png>` with a",
+                "representative normalized input, or rerun `jxl-parity profile --keep-work` and use",
+                "one of the exact commands recorded in `profile_samples.csv`.",
+                "",
+            ]
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_profile_report(
+    path: Path,
+    summary: ProfileSummary,
+    results: list[ProfileResult],
+    config: ProfileConfig,
+) -> None:
+    completed = [result for result in results if result.status == "completed"]
+    slowest = sorted(
+        completed,
+        key=lambda result: (
+            result.encode_seconds_per_mp if result.encode_seconds_per_mp is not None else -1.0
+        ),
+        reverse=True,
+    )[:10]
+
+    lines = [
+        "# Profile Report",
+        "",
+        "This report summarizes encode-total profiling runs. It does not contain named JPEG XL",
+        "internal stages because the stock encoder CLIs do not expose them.",
+        "",
+        "## Summary",
+        "",
+        f"- Images: {summary.images}",
+        f"- Cases: {summary.total_cases}",
+        f"- Completed: {summary.completed_cases}",
+        f"- Failed: {summary.failed_cases}",
+        f"- Skipped: {summary.skipped_cases}",
+        f"- Encoder selection: {summary.encoder}",
+        f"- Measured samples per case: {config.samples}",
+        f"- Warmups per case: {config.warmups}",
+        "",
+        "## Artifacts",
+        "",
+        "- `profile_runs.csv`: one aggregate row per image/settings/encoder case.",
+        "- `profile_samples.csv`: one row per warmup and measured encode invocation.",
+        "- `stage_timing.json`: encode-total timing shaped as stage data for downstream tools.",
+        "- `profiler_commands.md`: perf/samply/flamegraph command templates for stack attribution.",
+        "",
+        "## Slowest Completed Cases",
+        "",
+    ]
+    if slowest:
+        lines.extend(
+            [
+                "| Image | Encoder | Mode | Distance | Effort | Avg seconds | Seconds/MP | Stdev | Samples |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        lines.extend(
+            "| {image} | {encoder} | {mode} | {distance} | {effort} | {seconds} | {seconds_per_mp} | {stdev} | {samples} |".format(
+                image=result.image_id,
+                encoder=result.encoder,
+                mode=result.mode,
+                distance="" if result.distance is None else result.distance,
+                effort=result.effort,
+                seconds=_format_number(result.encode_seconds),
+                seconds_per_mp=_format_number(result.encode_seconds_per_mp),
+                stdev=_format_number(result.encode_seconds_stdev),
+                samples=result.sample_count,
+            )
+            for result in slowest
+        )
+    else:
+        lines.append("No completed profile cases.")
+    lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -484,3 +566,7 @@ def _reference_path(image: ImageRecord) -> Path:
 
 def _csv_fields(data_class: type[object]) -> list[str]:
     return [field.name for field in fields(data_class)]
+
+
+def _format_number(value: float | None) -> str:
+    return "" if value is None else f"{value:.6g}"
