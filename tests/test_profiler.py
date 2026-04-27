@@ -123,10 +123,14 @@ class ProfilerTests(unittest.TestCase):
             profile_report = (out_dir / "profile_report.md").read_text(encoding="utf-8")
             self.assertIn("profile_samples.csv", profile_report)
             self.assertIn("Measured samples per case: 2", profile_report)
+            self.assertIn("Stage Timing Feasibility", profile_report)
+            self.assertIn("cannot attribute time to color transform", profile_report)
             profiler_commands = (out_dir / "profiler_commands.md").read_text(encoding="utf-8")
             self.assertIn("perf record", profiler_commands)
             self.assertIn("<reference.png>", profiler_commands)
             self.assertIn("--keep-work", profiler_commands)
+            self.assertIn("Named Stage Timing", profiler_commands)
+            self.assertIn("use a custom\n`jxl-encoder` build", profiler_commands)
 
     def test_profile_reports_unsupported_inputs_as_skips(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

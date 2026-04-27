@@ -169,6 +169,8 @@ The stock encoder CLIs do not expose internal JPEG XL stage timings, so use
 `profiler_commands.md` to capture stack samples or flamegraphs for
 representative cases. Pass `--keep-work` when you want the exact normalized
 input files and recorded commands to remain usable after the profile run.
+See `docs/stage-profiling-assessment.md` for the detailed feasibility answer and
+the `jxl-encoder` changes needed for true named-stage timings.
 
 ## Tests
 

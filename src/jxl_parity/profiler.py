@@ -475,6 +475,7 @@ def _write_profiler_commands(path: Path, config: ProfileConfig, results: list[Pr
                 "",
             ]
         )
+    lines.extend(_stage_instrumentation_guidance_lines())
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -516,6 +517,15 @@ def _write_profile_report(
         "- `profile_samples.csv` / `profile_samples.json`: one row per warmup and measured encode invocation.",
         "- `stage_timing.json`: encode-total timing shaped as stage data for downstream tools.",
         "- `profiler_commands.md`: perf/samply/flamegraph command templates for stack attribution.",
+        "",
+        "## Stage Timing Feasibility",
+        "",
+        "Current runs can compare whole encode time across images, modes, distances, and efforts,",
+        "but cannot attribute time to color transform, block statistics, DCT/IDCT candidate",
+        "transforms, quantization scoring, filter simulation, or histogram prepass.",
+        "",
+        "Getting those timings requires a custom `jxl-encoder` build that records spans inside",
+        "the Rust encoder and emits structured timing data for this harness to ingest.",
         "",
         "## Slowest Completed Cases",
         "",
@@ -588,6 +598,26 @@ def _example_command_for_encoder(config: ProfileConfig, encoder_name: str) -> st
     if mode == "lossless":
         return _shell_join([command, input_path, output, "-e", config.efforts[0], "--lossless"])
     return _shell_join([command, input_path, output, "-e", config.efforts[0], "-d", distance])
+
+
+def _stage_instrumentation_guidance_lines() -> list[str]:
+    return [
+        "## Named Stage Timing",
+        "",
+        "The current harness cannot produce true named-stage timings from stock `cjxl-rs`.",
+        "`--instrument-stages` marks the run and emits profiling guidance; it does not",
+        "change the encoder binary or expose internal spans by itself.",
+        "",
+        "To get timings for color transform, block statistics, DCT/IDCT candidate transforms,",
+        "quantization scoring, filter simulation, and histogram prepass, use a custom",
+        "`jxl-encoder` build that:",
+        "",
+        "- adds a low-overhead stage timer in the Rust encoder;",
+        "- wraps the relevant VarDCT and modular functions with stable stage names;",
+        "- emits per-stage JSON or JSONL to stderr or a sidecar file;",
+        "- has `jxl-parity profile` collect that sidecar and merge it into `stage_timing.json`.",
+        "",
+    ]
 
 
 def _requested_encoders(value: str) -> list[str]:
