@@ -247,6 +247,21 @@ class ProfilerTests(unittest.TestCase):
             self.assertEqual(stages["color_xyb"]["seconds"], 0.02)
             self.assertEqual(stages["color_xyb"]["sample_count"], 2)
             self.assertEqual(stages["color_xyb"]["warmup_count"], 1)
+            self.assertEqual(
+                stage_timing["runs"][0]["stage_accounting"]["sample_count"], 2
+            )
+            self.assertEqual(
+                stage_timing["runs"][0]["stage_accounting"][
+                    "sidecar_total_stage_seconds"
+                ],
+                0.02,
+            )
+            self.assertAlmostEqual(
+                stage_timing["runs"][0]["stage_accounting"][
+                    "harness_unattributed_seconds"
+                ],
+                0.27999999999999997,
+            )
             aggregates = {entry["stage"]: entry for entry in stage_timing["aggregates"]}
             self.assertEqual(aggregates["color_xyb"]["avg_seconds"], 0.02)
 

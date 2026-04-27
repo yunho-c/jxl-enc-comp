@@ -430,17 +430,19 @@ def _stage_timing_payload(
                 }
             )
         stages.extend(_aggregate_result_stage_timings(result))
-        runs.append(
-            {
-                "image_id": result.image_id,
-                "encoder": result.encoder,
-                "mode": result.mode,
-                "distance": result.distance,
-                "effort": result.effort,
-                "status": result.status,
-                "stages": stages,
-            }
-        )
+        run: dict[str, object] = {
+            "image_id": result.image_id,
+            "encoder": result.encoder,
+            "mode": result.mode,
+            "distance": result.distance,
+            "effort": result.effort,
+            "status": result.status,
+            "stages": stages,
+        }
+        stage_accounting = _aggregate_stage_accounting(result)
+        if stage_accounting is not None:
+            run["stage_accounting"] = stage_accounting
+        runs.append(run)
 
     return {
         "schema_version": 1,
@@ -571,6 +573,36 @@ def _aggregate_result_stage_timings(result: ProfileResult) -> list[dict[str, obj
             }
         )
     return stages
+
+
+def _aggregate_stage_accounting(result: ProfileResult) -> dict[str, object] | None:
+    samples = _stage_timing_samples(result)
+    if not samples:
+        return None
+
+    elapsed = _numeric_sample_values(samples, "elapsed_wall_seconds")
+    total_stage = _numeric_sample_values(samples, "total_stage_wall_seconds")
+    sidecar_unattributed = _numeric_sample_values(samples, "unattributed_wall_seconds")
+    avg_total_stage = _average(total_stage)
+    return {
+        "sample_count": len(samples),
+        "sidecar_elapsed_seconds": _average(elapsed),
+        "sidecar_total_stage_seconds": avg_total_stage,
+        "sidecar_unattributed_seconds": _average(sidecar_unattributed),
+        "harness_unattributed_seconds": (
+            result.encode_seconds - avg_total_stage
+            if result.encode_seconds is not None and avg_total_stage is not None
+            else None
+        ),
+    }
+
+
+def _numeric_sample_values(samples: list[dict[str, Any]], key: str) -> list[float]:
+    return [
+        float(value)
+        for sample in samples
+        if isinstance((value := sample.get(key)), int | float)
+    ]
 
 
 def _aggregate_stage_totals(results: list[ProfileResult]) -> list[dict[str, object]]:

@@ -168,8 +168,10 @@ measured-sample average and min/median/max/stdev are included alongside it.
 When `--instrument-stages` is used with a compatible `cjxl-rs` build that
 supports `--stage-timing-json`, the harness writes per-sample sidecars and
 merges the named Rust encoder stages into `profile_samples.json` and
-`stage_timing.json`. `encode_total` remains the outer process wall-clock timing
-so stage overhead and unattributed setup or I/O time stay visible.
+`stage_timing.json`. `stage_timing.json` also summarizes sidecar accounting per
+case, including named-stage total time and unattributed time. `encode_total`
+remains the outer process wall-clock timing so stage overhead and unattributed
+setup or I/O time stay visible.
 
 Stock encoder CLIs do not expose internal JPEG XL stage timings, so the harness
 keeps the encode-total behavior for those binaries. Use `profiler_commands.md`
