@@ -78,6 +78,7 @@ class ProfilerTests(unittest.TestCase):
             encode_seconds = iter([0.10, 0.25, 0.35])
 
             def fake_encode(**kwargs):
+                self.assertIsNone(kwargs["stage_timing_path"])
                 kwargs["output_path"].write_bytes(b"jxl")
                 return CommandResult(
                     ["cjxl-rs", "input.png"], 0, next(encode_seconds), "", ""
@@ -85,6 +86,9 @@ class ProfilerTests(unittest.TestCase):
 
             with (
                 patch("jxl_parity.profiler.tool_path", side_effect=fake_tool_path),
+                patch(
+                    "jxl_parity.profiler.tool_supports_option", return_value=False
+                ),
                 patch("jxl_parity.profiler.encode", side_effect=fake_encode),
             ):
                 summary = run_profile(
@@ -205,6 +209,7 @@ class ProfilerTests(unittest.TestCase):
 
             with (
                 patch("jxl_parity.profiler.tool_path", side_effect=fake_tool_path),
+                patch("jxl_parity.profiler.tool_supports_option", return_value=True),
                 patch("jxl_parity.profiler.encode", side_effect=fake_encode),
             ):
                 run_profile(

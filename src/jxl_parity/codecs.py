@@ -31,6 +31,23 @@ def tool_path(command: str) -> str | None:
     return shutil.which(command)
 
 
+def tool_supports_option(command: str, option: str) -> bool:
+    resolved = tool_path(command)
+    if resolved is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [resolved, "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return option in completed.stdout or option in completed.stderr
+
+
 def encode(
     encoder: str,
     command: str,

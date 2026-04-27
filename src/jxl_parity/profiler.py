@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from .codecs import encode, tool_path
+from .codecs import encode, tool_path, tool_supports_option
 from .corpus import ImageRecord, discover_images
 from .reports import write_csv, write_json
 
@@ -113,6 +113,13 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
         "cjxl": tool_path(config.cjxl) is not None,
         "jxl_encoder": tool_path(config.jxl_encoder) is not None,
     }
+    stage_timing_supported = (
+        config.instrument_stages
+        and "jxl-encoder" in requested_encoders
+        and tool_status["jxl_encoder"]
+        and tool_supports_option(config.jxl_encoder, "--stage-timing-json")
+    )
+    tool_status["jxl_encoder_stage_timing"] = stage_timing_supported
     images = discover_images(config.corpus, work_dir, config.max_images)
     results: list[ProfileResult] = []
     samples: list[ProfileSample] = []
@@ -145,6 +152,7 @@ def run_profile(config: ProfileConfig) -> ProfileSummary:
                             samples=config.samples,
                             warmups=config.warmups,
                             instrument_stages=config.instrument_stages,
+                            stage_timing_supported=stage_timing_supported,
                         )
                         results.append(result)
                         samples.extend(case_samples)
@@ -199,6 +207,7 @@ def _profile_case(
     samples: int,
     warmups: int,
     instrument_stages: bool,
+    stage_timing_supported: bool,
 ) -> tuple[ProfileResult, list[ProfileSample]]:
     result = ProfileResult(
         image_id=image.image_id,
@@ -249,7 +258,9 @@ def _profile_case(
             warmup=True,
             stage_timing_path=(
                 _stage_timing_path(encoded_dir, case_id, "warmup", warmup_index + 1)
-                if instrument_stages and encoder_name == "jxl-encoder"
+                if _should_collect_stage_timing(
+                    instrument_stages, stage_timing_supported, encoder_name
+                )
                 else None
             ),
         )
@@ -274,7 +285,9 @@ def _profile_case(
             warmup=False,
             stage_timing_path=(
                 _stage_timing_path(encoded_dir, case_id, "sample", sample_index + 1)
-                if instrument_stages and encoder_name == "jxl-encoder"
+                if _should_collect_stage_timing(
+                    instrument_stages, stage_timing_supported, encoder_name
+                )
                 else None
             ),
         )
@@ -495,6 +508,16 @@ def _read_stage_timing(path: Path | None) -> dict[str, Any] | None:
 
 def _stage_timing_path(encoded_dir: Path, case_id: str, kind: str, index: int) -> Path:
     return encoded_dir / f"{case_id}-{kind}{index}.stage-timing.json"
+
+
+def _should_collect_stage_timing(
+    instrument_stages: bool, stage_timing_supported: bool, encoder_name: str
+) -> bool:
+    return (
+        instrument_stages
+        and stage_timing_supported
+        and encoder_name == "jxl-encoder"
+    )
 
 
 def _stage_timing_samples(result: ProfileResult) -> list[dict[str, Any]]:
