@@ -58,6 +58,15 @@ class CliTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--distances values must be finite numbers", stderr.getvalue())
 
+    def test_rejects_non_positive_max_images(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["run", "--max-images", "0"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--max-images must be at least 1", stderr.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

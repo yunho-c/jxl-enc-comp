@@ -29,6 +29,21 @@ class CorpusTests(unittest.TestCase):
             self.assertTrue(all(record.reference_path.exists() for record in records))
             self.assertEqual({record.source_format for record in records}, {"PNG", "JPEG"})
 
+    def test_max_images_limits_discovered_images(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corpus = root / "corpus"
+            work = root / "work"
+            corpus.mkdir()
+
+            for name in ("a.png", "b.png", "c.png"):
+                Image.new("RGB", (2, 2), (10, 20, 30)).save(corpus / name)
+
+            records = discover_images([corpus], work, max_images=2)
+
+            self.assertEqual([record.source_path.name for record in records], ["a.png", "b.png"])
+            self.assertEqual(len(list((work / "reference").glob("*.png"))), 2)
+
     def test_normalizes_palette_and_one_bit_png_references(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
