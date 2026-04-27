@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .profiler import ProfileConfig, run_profile
+from .profiler import ProfileConfig, ProfileSummary, run_profile
 from .runner import RunConfig, run_suite
 
 VALID_MODES = {"lossless", "vardct"}
@@ -193,6 +193,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"cases={summary.total_cases} completed={summary.completed_cases} "
             f"failed={summary.failed_cases} skipped={summary.skipped_cases}"
         )
+        if args.instrument_stages:
+            print(_stage_timing_status(summary))
         return 1 if summary.failed_cases else 0
 
     parser.error(f"unknown command: {args.command}")
@@ -201,6 +203,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _stage_timing_status(summary: ProfileSummary) -> str:
+    if summary.tool_status.get("jxl_encoder_stage_timing"):
+        return "stage_timing=jxl-encoder sidecars enabled"
+    if summary.encoder == "libjxl":
+        return "stage_timing=encode_total only (libjxl has no sidecar support)"
+    if not summary.tool_status.get("jxl_encoder"):
+        return "stage_timing=unavailable (jxl-encoder command not found)"
+    return "stage_timing=encode_total only (cjxl-rs lacks --stage-timing-json)"
 
 
 def _parse_csv_choice(

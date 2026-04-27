@@ -5,8 +5,10 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from jxl_parity.cli import main
+from jxl_parity.profiler import ProfileSummary
 
 
 class CliTests(unittest.TestCase):
@@ -93,6 +95,69 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--warmups must be at least 0", stderr.getvalue())
+
+    def test_profile_reports_enabled_stage_sidecars(self) -> None:
+        stdout = io.StringIO()
+        summary = ProfileSummary(
+            out_dir=Path("reports/profile"),
+            images=1,
+            total_cases=1,
+            completed_cases=1,
+            failed_cases=0,
+            skipped_cases=0,
+            encoder="jxl-encoder",
+            instrument_stages=True,
+            samples_per_case=1,
+            warmups_per_case=0,
+            tool_status={
+                "cjxl": True,
+                "jxl_encoder": True,
+                "jxl_encoder_stage_timing": True,
+            },
+        )
+
+        with (
+            patch("jxl_parity.cli.run_profile", return_value=summary),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = main(["profile", "--instrument-stages"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn(
+            "stage_timing=jxl-encoder sidecars enabled", stdout.getvalue()
+        )
+
+    def test_profile_reports_encode_total_stage_fallback(self) -> None:
+        stdout = io.StringIO()
+        summary = ProfileSummary(
+            out_dir=Path("reports/profile"),
+            images=1,
+            total_cases=1,
+            completed_cases=1,
+            failed_cases=0,
+            skipped_cases=0,
+            encoder="jxl-encoder",
+            instrument_stages=True,
+            samples_per_case=1,
+            warmups_per_case=0,
+            tool_status={
+                "cjxl": True,
+                "jxl_encoder": True,
+                "jxl_encoder_stage_timing": False,
+            },
+        )
+
+        with (
+            patch("jxl_parity.cli.run_profile", return_value=summary),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = main(["profile", "--instrument-stages"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn(
+            "stage_timing=encode_total only (cjxl-rs lacks --stage-timing-json)",
+            stdout.getvalue(),
+        )
 
 
 if __name__ == "__main__":
