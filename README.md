@@ -46,6 +46,15 @@ Install the Rust encoder CLI with:
 cargo install jxl-encoder-cli
 ```
 
+Named stage profiling requires a fork or local build of `cjxl-rs` that supports
+`--stage-timing-json`. If you have the instrumented `jxl-encoder` checkout next
+to this repo, install it over any stock `cjxl-rs` with:
+
+```bash
+cargo install --path ~/GitHub/jxl-encoder/jxl-encoder-cli --force
+cjxl-rs --help | grep -- --stage-timing-json
+```
+
 ## Running Focused Sweeps
 
 Use `--max-images` for a smoke run:
@@ -173,11 +182,12 @@ case, including named-stage total time and unattributed time. `encode_total`
 remains the outer process wall-clock timing so stage overhead and unattributed
 setup or I/O time stay visible.
 
-Stock encoder CLIs do not expose internal JPEG XL stage timings, so the harness
-keeps the encode-total behavior for those binaries. Use `profiler_commands.md`
-to capture stack samples or flamegraphs for representative cases. Pass
-`--keep-work` when you want the exact normalized input files and recorded
-commands to remain usable after the profile run. See
+Stock encoder CLIs do not expose internal JPEG XL stage timings. If
+`cjxl-rs --help` does not list `--stage-timing-json`, the harness keeps the
+encode-total behavior for that binary even when `--instrument-stages` is passed.
+Use `profiler_commands.md` to capture stack samples or flamegraphs for
+representative cases. Pass `--keep-work` when you want the exact normalized
+input files and recorded commands to remain usable after the profile run. See
 `docs/stage-profiling-assessment.md` for the detailed feasibility answer.
 
 ## Tests
